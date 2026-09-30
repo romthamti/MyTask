@@ -1,7 +1,7 @@
 import { firebaseConfig } from './config.js';
 import { normalizeTask } from './utils.js';
 
-const FIREBASE_SDK = 'https://www.gstatic.com/firebasejs/10.14.1';
+const FIREBASE_SDK = 'https://www.gstatic.com/firebasejs/12.19.0';
 
 export const isFirebaseConfigured = () => !!(firebaseConfig?.apiKey && firebaseConfig?.projectId);
 
