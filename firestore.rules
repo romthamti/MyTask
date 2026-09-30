@@ -1,0 +1,28 @@
+rules_version = '2';
+
+// คัดลอกทั้งไฟล์นี้ไปวางที่ Firebase Console › Firestore Database › Rules แล้วกด Publish
+service cloud.firestore {
+  match /databases/{database}/documents {
+
+    // แต่ละคนอ่าน/เขียนได้เฉพาะงานของตัวเองที่ users/{uid}/tasks/...
+    match /users/{uid}/tasks/{taskId} {
+      allow read, delete: if isOwner(uid);
+      allow create, update: if isOwner(uid) && validTask(request.resource.data);
+    }
+
+    function isOwner(uid) {
+      return request.auth != null && request.auth.uid == uid;
+      // ถ้าต้องการให้ใช้ได้เฉพาะอีเมลของคุณคนเดียว ให้ใช้บรรทัดนี้แทน:
+      // return request.auth != null && request.auth.uid == uid
+      //   && request.auth.token.email == 'your-email@gmail.com';
+    }
+
+    function validTask(t) {
+      return t.title is string && t.title.size() > 0 && t.title.size() <= 200
+        && t.description is string && t.description.size() <= 5000
+        && t.priority in ['high', 'medium', 'low']
+        && t.done is bool
+        && t.tags is list && t.tags.size() <= 20;
+    }
+  }
+}

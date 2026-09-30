@@ -1,0 +1,823 @@
+import { createStore } from './store.js';
+import * as U from './utils.js';
+
+const $ = (sel, root = document) => root.querySelector(sel);
+const $$ = (sel, root = document) => [...root.querySelectorAll(sel)];
+const esc = U.escapeHtml;
+
+const ICONS = {
+  check: '<path d="M6 12.5l4 4L18 8.5"/>',
+  trash: '<path d="M4 7h16M10 11v6M14 11v6M6 7l1 12a2 2 0 0 0 2 2h6a2 2 0 0 0 2-2l1-12M9 7V4h6v3"/>',
+  calendar: '<path d="M4 7a2 2 0 0 1 2-2h12a2 2 0 0 1 2 2v12a2 2 0 0 1-2 2H6a2 2 0 0 1-2-2zM4 10h16M8 3v4M16 3v4"/>',
+  clock: '<path d="M12 21a9 9 0 1 0 0-18 9 9 0 0 0 0 18zM12 7v5l3 2"/>',
+  note: '<path d="M5 6h14M5 11h14M5 16h9"/>',
+  left: '<path d="M15 6l-6 6 6 6"/>',
+  right: '<path d="M9 6l6 6-6 6"/>',
+  plus: '<path d="M12 5v14M5 12h14"/>',
+  search: '<path d="M11 18a7 7 0 1 0 0-14 7 7 0 0 0 0 14zM20 20l-4-4"/>',
+  close: '<path d="M6 6l12 12M18 6L6 18"/>',
+  inbox: '<path d="M4 13l2.5-7h11l2.5 7v5a1 1 0 0 1-1 1H5a1 1 0 0 1-1-1zM4 13h5l1 2h4l1-2h5"/>',
+};
+const icon = (name) => `<svg viewBox="0 0 24 24" aria-hidden="true">${ICONS[name]}</svg>`;
+
+// ---------- ค่าที่จำไว้ในเครื่อง (มุมมอง ตัวกรอง ธีม) ----------
+const PREFS_KEY = 'mytodo.prefs';
+const prefs = (() => {
+  try {
+    return JSON.parse(localStorage.getItem(PREFS_KEY)) || {};
+  } catch {
+    return {};
+  }
+})();
+function savePrefs(patch) {
+  Object.assign(prefs, patch);
+  try {
+    localStorage.setItem(PREFS_KEY, JSON.stringify(prefs));
+  } catch {}
+}
+
+const VIEWS = ['dashboard', 'list', 'calendar'];
+const STATUSES = [
+  ['pending', 'ค้างอยู่'],
+  ['overdue', 'เลยกำหนด'],
+  ['done', 'เสร็จแล้ว'],
+  ['all', 'ทั้งหมด'],
+];
+const SORTS = [
+  ['due', 'วันครบกำหนด'],
+  ['priority', 'ความสำคัญ'],
+  ['created', 'เพิ่มล่าสุด'],
+];
+const savedFilter = prefs.filter || {};
+
+const state = {
+  tasks: [],
+  view: VIEWS.includes(prefs.view) ? prefs.view : 'dashboard',
+  filter: {
+    status: STATUSES.some(([v]) => v === savedFilter.status) ? savedFilter.status : 'pending',
+    sort: SORTS.some(([v]) => v === savedFilter.sort) ? savedFilter.sort : 'due',
+    tag: typeof savedFilter.tag === 'string' ? savedFilter.tag : '',
+    q: '',
+  },
+  quickWhen: '',
+  cal: { mode: prefs.calMode === 'week' ? 'week' : 'month', cursor: new Date(), selected: U.todayISO() },
+  editingId: null,
+};
+const saveFilter = () => savePrefs({ filter: { status: state.filter.status, sort: state.filter.sort, tag: state.filter.tag } });
+
+let store = null;
+const dialog = $('#task-dialog');
+const form = $('#task-form');
+
+// ---------- เริ่มต้น ----------
+async function init() {
+  applyTheme(prefs.theme || 'auto');
+  bindEvents();
+  $('#view').innerHTML = loadingHTML();
+  try {
+    store = await createStore();
+  } catch (err) {
+    console.error(err);
+    $('#view').innerHTML = `
+      <div class="empty">
+        ${icon('close')}
+        <h2>เชื่อมต่อ Firebase ไม่สำเร็จ</h2>
+        <p>ตรวจสอบอินเทอร์เน็ตและค่าใน <code>js/config.js</code> แล้วลองใหม่</p>
+        <button class="btn btn-primary" type="button" onclick="location.reload()">ลองใหม่</button>
+      </div>`;
+    return;
+  }
+  store.onError = (err) => {
+    console.error(err);
+    toast(errorMessage(err));
+  };
+  store.onAuth(() => render());
+  store.subscribe((tasks) => {
+    state.tasks = tasks;
+    render();
+  });
+  // อัปเดตสถานะ "เลยกำหนด" ตามเวลาที่ผ่านไป
+  setInterval(() => {
+    if (!dialog.open && document.visibilityState === 'visible' && !isTyping()) render();
+  }, 60_000);
+  document.addEventListener('visibilitychange', () => {
+    if (document.visibilityState === 'visible' && !dialog.open) render();
+  });
+}
+
+// ---------- วาดหน้าจอ ----------
+function render() {
+  if (!store) return;
+  renderAccount();
+  renderBanner();
+  const needLogin = store.mode === 'firebase' && !store.user;
+  document.body.classList.toggle('logged-out', needLogin);
+  $$('.tab').forEach((b) => b.setAttribute('aria-current', b.dataset.view === state.view ? 'page' : 'false'));
+
+  const el = $('#view');
+  if (needLogin) {
+    el.innerHTML = loginHTML();
+    return;
+  }
+  if (!store.ready) {
+    el.innerHTML = loadingHTML();
+    return;
+  }
+
+  // คงโฟกัสช่องพิมพ์ไว้หลังวาดใหม่
+  const active = document.activeElement;
+  const focusId = el.contains(active) ? active.id : '';
+  const caret = focusId && 'selectionStart' in active ? active.selectionStart : null;
+
+  el.innerHTML = { dashboard: dashboardView, list: listView, calendar: calendarView }[state.view]();
+
+  if (focusId) {
+    const f = document.getElementById(focusId);
+    if (f) {
+      f.focus();
+      if (caret != null) {
+        try {
+          f.setSelectionRange(caret, caret);
+        } catch {}
+      }
+    }
+  }
+}
+
+function renderAccount() {
+  const el = $('#account');
+  if (store.mode === 'firebase') {
+    const u = store.user;
+    el.innerHTML = u
+      ? `<div class="account">
+           ${u.photoURL ? `<img class="avatar" src="${esc(u.photoURL)}" alt="" referrerpolicy="no-referrer" />` : ''}
+           <div class="account-text">
+             <div class="account-name">${esc(u.displayName || 'ผู้ใช้')}</div>
+             <div class="account-sub">${esc(u.email || '')}</div>
+           </div>
+         </div>
+         <div class="sync-note"><i class="dot-online"></i>ซิงก์กับ Firebase</div>
+         <button class="menu-item" type="button" data-action="sign-out">ออกจากระบบ</button>`
+      : `<div class="menu-label">บัญชี</div><p class="account-sub">ยังไม่ได้เข้าสู่ระบบ</p>`;
+  } else {
+    el.innerHTML = `<div class="menu-label">โหมดเครื่องนี้</div>
+      <p class="account-sub">ข้อมูลเก็บในเบราว์เซอร์นี้เท่านั้น ใส่ค่า Firebase ใน <code>js/config.js</code> เพื่อซิงก์ทุกอุปกรณ์</p>`;
+  }
+  $$('[data-theme-value]').forEach((b) =>
+    b.setAttribute('aria-pressed', String(b.dataset.themeValue === (prefs.theme || 'auto'))),
+  );
+}
+
+function renderBanner() {
+  const show = store.mode === 'local' && !prefs.hideLocalBanner;
+  $('#banner').innerHTML = show
+    ? `<div class="banner">
+         <span><b>โหมดเครื่องนี้</b> — ข้อมูลเก็บในเบราว์เซอร์นี้เท่านั้น ตั้งค่า Firebase ใน <code>js/config.js</code> เพื่อซิงก์ทุกอุปกรณ์</span>
+         <button class="icon-btn" type="button" data-action="dismiss-banner" aria-label="ปิดข้อความ">${icon('close')}</button>
+       </div>`
+    : '';
+}
+
+const loadingHTML = () => `<div class="loading"><span class="spinner"></span>กำลังโหลด…</div>`;
+
+function loginHTML() {
+  return `
+    <div class="login-card">
+      <span class="brand-mark big" aria-hidden="true"><svg viewBox="0 0 24 24">${ICONS.check}</svg></span>
+      <h1>MyTodo</h1>
+      <p>จัดการงาน ตารางงาน และ To-do list ของคุณ<br />เข้าสู่ระบบเพื่อซิงก์ข้อมูลทุกอุปกรณ์</p>
+      <button class="btn btn-google" type="button" data-action="sign-in">
+        <svg viewBox="0 0 48 48" aria-hidden="true"><path fill="#FFC107" d="M43.6 20.5H42V20H24v8h11.3C33.7 32.7 29.2 36 24 36c-6.6 0-12-5.4-12-12s5.4-12 12-12c3.1 0 5.8 1.2 7.9 3.1l5.7-5.7C34 6.1 29.3 4 24 4 12.9 4 4 12.9 4 24s8.9 20 20 20 20-8.9 20-20c0-1.3-.1-2.4-.4-3.5z"/><path fill="#FF3D00" d="M6.3 14.7l6.6 4.8C14.7 15.1 19 12 24 12c3.1 0 5.8 1.2 7.9 3.1l5.7-5.7C34 6.1 29.3 4 24 4 16.3 4 9.7 8.3 6.3 14.7z"/><path fill="#4CAF50" d="M24 44c5.2 0 9.9-2 13.4-5.2l-6.2-5.2C29.2 35.1 26.7 36 24 36c-5.2 0-9.6-3.3-11.3-7.9l-6.5 5C9.5 39.6 16.2 44 24 44z"/><path fill="#1976D2" d="M43.6 20.5H42V20H24v8h11.3c-.8 2.2-2.2 4.2-4.1 5.6l6.2 5.2C37 39.2 44 34 44 24c0-1.3-.1-2.4-.4-3.5z"/></svg>
+        เข้าสู่ระบบด้วย Google
+      </button>
+    </div>`;
+}
+
+function emptyHTML(title, text, withAdd = true) {
+  return `
+    <div class="empty">
+      ${icon('inbox')}
+      <h2>${title}</h2>
+      <p>${text}</p>
+      ${withAdd ? `<button class="btn btn-primary" type="button" data-action="add">${icon('plus')}เพิ่มงานแรก</button>` : ''}
+    </div>`;
+}
+
+// ---------- ส่วนประกอบรายการงาน ----------
+function taskItemHTML(t, { showDate = true } = {}) {
+  const overdue = U.isOverdue(t);
+  const meta = [];
+  if (t.dueDate && (showDate || t.dueTime)) {
+    const label = [showDate ? U.relativeDateLabel(t.dueDate) : '', t.dueTime].filter(Boolean).join(' · ');
+    meta.push(`<span class="meta${overdue ? ' is-overdue' : ''}">${icon(showDate ? 'calendar' : 'clock')}${label}</span>`);
+  }
+  if (t.priority !== 'medium') {
+    meta.push(`<span class="prio-badge prio-${t.priority}">${U.PRIORITIES[t.priority].label}</span>`);
+  }
+  if (t.description) meta.push(`<span class="meta" title="มีรายละเอียด">${icon('note')}</span>`);
+  for (const tag of t.tags) meta.push(`<span class="tag">#${esc(tag)}</span>`);
+
+  return `
+    <li class="task prio-${t.priority}${t.done ? ' is-done' : ''}" data-id="${esc(t.id)}">
+      <button class="check" type="button" data-action="toggle" aria-pressed="${t.done}"
+        aria-label="${t.done ? 'ทำเครื่องหมายว่ายังไม่เสร็จ' : 'ทำเครื่องหมายว่าเสร็จแล้ว'}">${icon('check')}</button>
+      <button class="task-main" type="button" data-action="edit">
+        <span class="task-title">${esc(t.title)}</span>
+        ${meta.length ? `<span class="task-meta">${meta.join('')}</span>` : ''}
+      </button>
+      <button class="icon-btn task-del" type="button" data-action="delete" aria-label="ลบงาน">${icon('trash')}</button>
+    </li>`;
+}
+const taskListHTML = (list, opts) => `<ul class="task-list">${list.map((t) => taskItemHTML(t, opts)).join('')}</ul>`;
+
+const allTags = () =>
+  [...new Set(state.tasks.flatMap((t) => t.tags))].sort((a, b) => a.localeCompare(b, 'th'));
+
+// ---------- มุมมอง: ภาพรวม ----------
+function dashboardView() {
+  const now = new Date();
+  const hour = now.getHours();
+  const greeting = hour < 12 ? 'สวัสดีตอนเช้า' : hour < 17 ? 'สวัสดีตอนบ่าย' : 'สวัสดีตอนเย็น';
+  const head = `
+    <div class="page-head">
+      <p class="eyebrow">${U.F.full.format(now)}</p>
+      <h1>${greeting}</h1>
+    </div>`;
+
+  const tasks = state.tasks;
+  if (!tasks.length) return head + emptyHTML('ยังไม่มีงาน', 'เริ่มจากเพิ่มงานแรกของคุณ แล้วจัดตารางได้ในหน้า "ตารางงาน"');
+
+  const today = U.todayISO();
+  const in7 = U.toISODate(U.addDays(now, 7));
+  const pending = tasks.filter((t) => !t.done);
+  const overdue = pending.filter((t) => U.isOverdue(t)).sort(U.compareByDue);
+  const todayList = tasks.filter((t) => t.dueDate === today && !U.isOverdue(t)).sort(U.compareByDue);
+  const todayDone = todayList.filter((t) => t.done).length;
+  const upcoming = pending.filter((t) => t.dueDate && t.dueDate > today && t.dueDate <= in7).sort(U.compareByDue);
+  const noDate = pending.filter((t) => !t.dueDate).sort(U.compareByPriority);
+  const doneCount = tasks.length - pending.length;
+  const pct = Math.round((doneCount / tasks.length) * 100);
+
+  const panel = (title, list, { empty, showDate = true, tone = '', limit = 0 } = {}) => {
+    const shown = limit ? list.slice(0, limit) : list;
+    return `
+      <section class="panel${tone ? ` panel-${tone}` : ''}">
+        <header class="panel-head"><h2>${title}</h2><span class="count">${list.length}</span></header>
+        ${shown.length ? taskListHTML(shown, { showDate }) : `<p class="panel-empty">${empty}</p>`}
+        ${limit && list.length > limit ? `<button class="link-btn" type="button" data-action="goto-list" data-status="pending">ดูทั้งหมด ${list.length} งาน</button>` : ''}
+      </section>`;
+  };
+
+  return `
+    ${head}
+    <section class="stats">
+      <button class="stat" type="button" data-action="goto-calendar">
+        <span class="stat-label">งานวันนี้</span>
+        <span class="stat-value">${todayList.length - todayDone}</span>
+        <span class="stat-sub">เสร็จแล้ว ${todayDone} จาก ${todayList.length}</span>
+      </button>
+      <button class="stat${overdue.length ? ' stat-danger' : ''}" type="button" data-action="goto-list" data-status="overdue">
+        <span class="stat-label">เลยกำหนด</span>
+        <span class="stat-value">${overdue.length}</span>
+        <span class="stat-sub">${overdue.length ? 'ควรจัดการก่อน' : 'ไม่มีงานค้างเกินกำหนด'}</span>
+      </button>
+      <button class="stat" type="button" data-action="goto-list" data-status="pending">
+        <span class="stat-label">งานค้างทั้งหมด</span>
+        <span class="stat-value">${pending.length}</span>
+        <span class="stat-sub">7 วันข้างหน้า ${upcoming.length} งาน</span>
+      </button>
+      <button class="stat" type="button" data-action="goto-list" data-status="done">
+        <span class="stat-label">ความคืบหน้า</span>
+        <span class="stat-value">${pct}%</span>
+        <span class="progress" role="progressbar" aria-valuenow="${pct}" aria-valuemin="0" aria-valuemax="100"><span style="width:${pct}%"></span></span>
+        <span class="stat-sub">เสร็จ ${doneCount} จาก ${tasks.length} งาน</span>
+      </button>
+    </section>
+    <div class="dash-grid">
+      ${overdue.length ? panel('เลยกำหนด', overdue, { tone: 'danger' }) : ''}
+      ${panel('วันนี้', todayList, { empty: 'ไม่มีงานที่ครบกำหนดวันนี้', showDate: false })}
+      ${panel('7 วันข้างหน้า', upcoming, { empty: 'ยังไม่มีงานในสัปดาห์นี้' })}
+      ${noDate.length ? panel('ไม่มีกำหนด', noDate, { limit: 5 }) : ''}
+    </div>`;
+}
+
+// ---------- มุมมอง: รายการงาน ----------
+function filteredTasks() {
+  const { status, tag, q, sort } = state.filter;
+  const needle = q.trim().toLowerCase();
+  const list = state.tasks.filter(
+    (t) =>
+      (status === 'all' ||
+        (status === 'done' ? t.done : status === 'overdue' ? U.isOverdue(t) : !t.done)) &&
+      (!tag || t.tags.includes(tag)) &&
+      (!needle || [t.title, t.description, ...t.tags].some((s) => s.toLowerCase().includes(needle))),
+  );
+  const cmp =
+    sort === 'priority' ? U.compareByPriority : sort === 'created' ? (a, b) => b.createdAt - a.createdAt : U.compareByDue;
+  return list.sort(cmp);
+}
+
+function groupOf(t) {
+  if (t.done && state.filter.status === 'all') return ['done', 'เสร็จแล้ว'];
+  if (U.isOverdue(t)) return ['overdue', 'เลยกำหนด'];
+  if (!t.dueDate) return ['none', 'ไม่มีกำหนด'];
+  return [t.dueDate, `${U.relativeDateLabel(t.dueDate)} · ${U.F.weekdayLong.format(U.parseISODate(t.dueDate))}`];
+}
+
+function listResultsHTML() {
+  if (!state.tasks.length) return emptyHTML('ยังไม่มีงาน', 'พิมพ์ในช่องด้านบนแล้วกด Enter เพื่อเพิ่มงานได้ทันที', false);
+  const list = filteredTasks();
+  if (!list.length) return emptyHTML('ไม่พบงาน', 'ลองเปลี่ยนตัวกรองหรือคำค้นหา', false);
+  if (state.filter.sort !== 'due') return taskListHTML(list);
+
+  let html = '';
+  let current = null;
+  for (const t of list) {
+    const [key, label] = groupOf(t);
+    if (key !== current) {
+      if (current !== null) html += '</ul></section>';
+      html += `<section class="group${key === 'overdue' ? ' group-danger' : ''}"><h3 class="group-title">${esc(label)}</h3><ul class="task-list">`;
+      current = key;
+    }
+    html += taskItemHTML(t, { showDate: key === 'overdue' || key === 'done' });
+  }
+  return html + '</ul></section>';
+}
+
+function listView() {
+  const f = state.filter;
+  const tags = allTags();
+  if (f.tag && !tags.includes(f.tag)) f.tag = '';
+  const counts = {
+    pending: state.tasks.filter((t) => !t.done).length,
+    overdue: state.tasks.filter((t) => U.isOverdue(t)).length,
+    done: state.tasks.filter((t) => t.done).length,
+    all: state.tasks.length,
+  };
+  const opt = (v, l, cur) => `<option value="${esc(v)}"${v === cur ? ' selected' : ''}>${esc(l)}</option>`;
+
+  return `
+    <div class="page-head"><h1>รายการงาน</h1></div>
+    <form class="quick-add" id="quick-add" autocomplete="off">
+      ${icon('plus')}
+      <input id="quick-add-input" name="title" maxlength="200" placeholder="เพิ่มงานด่วน… ใส่ #แท็ก ได้ แล้วกด Enter" aria-label="ชื่องานใหม่" />
+      <select id="quick-when" name="when" aria-label="วันครบกำหนด">
+        ${opt('', 'ไม่มีกำหนด', state.quickWhen)}${opt('today', 'วันนี้', state.quickWhen)}${opt('tomorrow', 'พรุ่งนี้', state.quickWhen)}
+      </select>
+      <button class="btn btn-primary" type="submit">เพิ่ม</button>
+    </form>
+    <div class="toolbar">
+      <label class="search">${icon('search')}<input id="search-input" type="search" placeholder="ค้นหางาน" value="${esc(f.q)}" aria-label="ค้นหางาน" /></label>
+      <div class="segmented" role="group" aria-label="สถานะ">
+        ${STATUSES.map(([v, l]) => `<button type="button" data-action="set-status" data-status="${v}" aria-pressed="${f.status === v}">${l}<span class="seg-count">${counts[v]}</span></button>`).join('')}
+      </div>
+      <div class="selects">
+        <select id="sort-select" aria-label="เรียงตาม">${SORTS.map(([v, l]) => opt(v, `เรียง: ${l}`, f.sort)).join('')}</select>
+        <select id="tag-select" aria-label="กรองตามแท็ก">${opt('', 'ทุกแท็ก', f.tag)}${tags.map((t) => opt(t, `#${t}`, f.tag)).join('')}</select>
+      </div>
+    </div>
+    <div id="list-results">${listResultsHTML()}</div>`;
+}
+
+// ---------- มุมมอง: ตารางงาน ----------
+function tasksByDate() {
+  const map = new Map();
+  for (const t of state.tasks) {
+    if (!t.dueDate) continue;
+    if (!map.has(t.dueDate)) map.set(t.dueDate, []);
+    map.get(t.dueDate).push(t);
+  }
+  for (const list of map.values()) list.sort(U.compareByDue);
+  return map;
+}
+
+function calendarView() {
+  const { mode, cursor } = state.cal;
+  const byDate = tasksByDate();
+  let title;
+  if (mode === 'month') {
+    title = U.F.monthYear.format(cursor);
+  } else {
+    const start = U.startOfWeek(cursor);
+    title = `${U.F.dayMonth.format(start)} – ${U.F.dayMonthYear.format(U.addDays(start, 6))}`;
+  }
+  return `
+    <div class="cal-head">
+      <h1 class="cal-title">${title}</h1>
+      <div class="cal-controls">
+        <div class="cal-nav">
+          <button class="icon-btn" type="button" data-action="cal-prev" aria-label="ก่อนหน้า">${icon('left')}</button>
+          <button class="btn btn-sm" type="button" data-action="cal-today">วันนี้</button>
+          <button class="icon-btn" type="button" data-action="cal-next" aria-label="ถัดไป">${icon('right')}</button>
+        </div>
+        <div class="segmented" role="group" aria-label="รูปแบบ">
+          <button type="button" data-action="cal-mode" data-mode="month" aria-pressed="${mode === 'month'}">เดือน</button>
+          <button type="button" data-action="cal-mode" data-mode="week" aria-pressed="${mode === 'week'}">สัปดาห์</button>
+        </div>
+      </div>
+    </div>
+    ${mode === 'month' ? monthHTML(byDate) : weekHTML(byDate)}`;
+}
+
+function monthHTML(byDate) {
+  const { cursor, selected } = state.cal;
+  const today = U.todayISO();
+  const first = new Date(cursor.getFullYear(), cursor.getMonth(), 1);
+  const daysInMonth = new Date(cursor.getFullYear(), cursor.getMonth() + 1, 0).getDate();
+  const rows = Math.ceil((first.getDay() + daysInMonth) / 7);
+  const start = U.startOfWeek(first);
+
+  let cells = '';
+  for (let i = 0; i < rows * 7; i++) {
+    const d = U.addDays(start, i);
+    const iso = U.toISODate(d);
+    const list = byDate.get(iso) || [];
+    const cls = [
+      'cal-cell',
+      d.getMonth() !== cursor.getMonth() && 'is-outside',
+      iso === today && 'is-today',
+      iso === selected && 'is-selected',
+    ].filter(Boolean).join(' ');
+    const chips = list
+      .slice(0, 3)
+      .map(
+        (t) => `<button type="button" class="chip prio-${t.priority}${t.done ? ' is-done' : ''}${U.isOverdue(t) ? ' is-overdue' : ''}" data-action="edit" data-id="${esc(t.id)}" title="${esc(t.title)}">${t.dueTime ? `<b>${t.dueTime}</b> ` : ''}${esc(t.title)}</button>`,
+      )
+      .join('');
+    const dots = list
+      .slice(0, 4)
+      .map((t) => `<i class="dot prio-${t.priority}${t.done ? ' is-done' : ''}"></i>`)
+      .join('');
+    cells += `
+      <div class="${cls}" role="button" tabindex="0" data-action="select-day" data-date="${iso}"
+        aria-label="${U.F.full.format(d)}${list.length ? ` มี ${list.length} งาน` : ''}">
+        <span class="cal-num">${d.getDate()}</span>
+        <div class="cal-chips">${chips}${list.length > 3 ? `<span class="more">+${list.length - 3} งาน</span>` : ''}</div>
+        <div class="cal-dots">${dots}</div>
+      </div>`;
+  }
+
+  const selList = byDate.get(selected) || [];
+  return `
+    <div class="month">
+      <div class="cal-weekdays">${U.WEEKDAYS.map((w) => `<span>${w}</span>`).join('')}</div>
+      <div class="cal-grid">${cells}</div>
+    </div>
+    <section class="panel day-panel">
+      <header class="panel-head">
+        <h2>${U.relativeDateLabel(selected) === 'วันนี้' ? 'วันนี้ · ' : ''}${U.F.full.format(U.parseISODate(selected))}</h2>
+        <button class="btn btn-sm" type="button" data-action="add-on" data-date="${selected}">${icon('plus')}เพิ่มงาน</button>
+      </header>
+      ${selList.length ? taskListHTML(selList, { showDate: false }) : '<p class="panel-empty">ไม่มีงานในวันนี้ — แตะ "เพิ่มงาน" เพื่อเพิ่ม</p>'}
+    </section>`;
+}
+
+function weekHTML(byDate) {
+  const start = U.startOfWeek(state.cal.cursor);
+  const today = U.todayISO();
+  let cols = '';
+  for (let i = 0; i < 7; i++) {
+    const d = U.addDays(start, i);
+    const iso = U.toISODate(d);
+    const list = byDate.get(iso) || [];
+    cols += `
+      <section class="week-col${iso === today ? ' is-today' : ''}">
+        <header class="week-head">
+          <span class="wd">${U.WEEKDAYS[i]}</span>
+          <span class="wn">${d.getDate()}</span>
+          <span class="wc">${list.length ? `${list.length} งาน` : ''}</span>
+        </header>
+        ${list.length ? taskListHTML(list, { showDate: false }) : ''}
+        <button class="add-slot" type="button" data-action="add-on" data-date="${iso}">${icon('plus')}เพิ่ม</button>
+      </section>`;
+  }
+  return `<div class="week">${cols}</div>`;
+}
+
+// ---------- การกระทำ ----------
+function setView(view) {
+  state.view = view;
+  savePrefs({ view });
+  render();
+  window.scrollTo(0, 0);
+}
+
+function shiftCal(n) {
+  const c = state.cal.cursor;
+  state.cal.cursor = state.cal.mode === 'month' ? new Date(c.getFullYear(), c.getMonth() + n, 1) : U.addDays(c, 7 * n);
+  render();
+}
+
+function toggleTask(id) {
+  const t = store.get(id);
+  if (t) store.update(id, { done: !t.done });
+}
+
+function deleteTask(id) {
+  const t = store.get(id);
+  if (!t) return;
+  store.remove(id);
+  toast(`ลบ "${t.title}" แล้ว`, { action: 'เลิกทำ', onAction: () => store.put(t) });
+}
+
+function openTaskDialog({ task = null, date = '' } = {}) {
+  if (!store || (store.mode === 'firebase' && !store.user)) return;
+  toggleMenu(false);
+  state.editingId = task?.id || null;
+  const t = task || { title: '', description: '', dueDate: date, dueTime: '', priority: 'medium', tags: [], done: false };
+  const f = form.elements;
+  form.reset();
+  form.classList.toggle('is-edit', !!task);
+  $('#task-dialog-title').textContent = task ? 'แก้ไขงาน' : 'เพิ่มงาน';
+  f.title.value = t.title;
+  f.description.value = t.description;
+  f.dueDate.value = t.dueDate || '';
+  f.dueTime.value = t.dueTime || '';
+  f.priority.value = t.priority;
+  f.tags.value = t.tags.join(', ');
+  f.done.checked = t.done;
+  $('.field-error', form).hidden = true;
+  $('#tag-options').innerHTML = allTags().map((tag) => `<option value="${esc(tag)}"></option>`).join('');
+  dialog.showModal();
+  if (!task) f.title.focus();
+}
+
+function closeDialog() {
+  if (dialog.open) dialog.close();
+  state.editingId = null;
+}
+
+function submitTaskForm(e) {
+  e.preventDefault();
+  const f = form.elements;
+  const title = f.title.value.trim();
+  if (!title) {
+    $('.field-error', form).hidden = false;
+    f.title.focus();
+    return;
+  }
+  const dueTime = f.dueTime.value;
+  const data = {
+    title,
+    description: f.description.value.trim(),
+    // ใส่แค่เวลาโดยไม่ใส่วัน = วันนี้
+    dueDate: f.dueDate.value || (dueTime ? U.todayISO() : null),
+    dueTime,
+    priority: f.priority.value || 'medium',
+    tags: f.tags.value.split(/[,，]/).map((s) => s.trim()).filter(Boolean),
+  };
+  if (state.editingId && store.get(state.editingId)) {
+    store.update(state.editingId, { ...data, done: f.done.checked });
+    toast('บันทึกการแก้ไขแล้ว');
+  } else {
+    store.add(data);
+    toast('เพิ่มงานแล้ว');
+  }
+  closeDialog();
+}
+
+function quickAdd(e) {
+  e.preventDefault();
+  const input = $('#quick-add-input');
+  const raw = input.value.trim();
+  if (!raw) return;
+  const tags = [...raw.matchAll(/#([^\s#]+)/g)].map((m) => m[1]);
+  const title = raw.replace(/#[^\s#]+/g, '').replace(/\s+/g, ' ').trim() || raw;
+  const when = $('#quick-when').value;
+  state.quickWhen = when;
+  const dueDate = when === 'today' ? U.todayISO() : when === 'tomorrow' ? U.toISODate(U.addDays(new Date(), 1)) : null;
+  input.value = '';
+  store.add({ title, tags, dueDate, priority: 'medium' });
+}
+
+function exportJSON() {
+  const data = { app: 'mytodo', version: 1, exportedAt: new Date().toISOString(), tasks: state.tasks };
+  const url = URL.createObjectURL(new Blob([JSON.stringify(data, null, 2)], { type: 'application/json' }));
+  const a = Object.assign(document.createElement('a'), { href: url, download: `mytodo-${U.todayISO()}.json` });
+  document.body.append(a);
+  a.click();
+  a.remove();
+  setTimeout(() => URL.revokeObjectURL(url), 1000);
+  toast(`ส่งออก ${state.tasks.length} งานแล้ว`);
+}
+
+async function importJSON(file) {
+  try {
+    const data = JSON.parse(await file.text());
+    const list = Array.isArray(data) ? data : data?.tasks;
+    if (!Array.isArray(list)) throw new Error('bad format');
+    const valid = list.filter((t) => t && typeof t === 'object' && String(t.title ?? '').trim());
+    await store.importMany(valid);
+    toast(`นำเข้า ${valid.length} งานแล้ว`);
+  } catch {
+    toast('ไฟล์ไม่ถูกต้อง — ต้องเป็นไฟล์ JSON ที่ส่งออกจาก MyTodo');
+  }
+}
+
+async function signIn() {
+  try {
+    await store.signIn();
+  } catch (err) {
+    console.error(err);
+    toast(errorMessage(err));
+  }
+}
+
+function applyTheme(v) {
+  if (v === 'light' || v === 'dark') document.documentElement.dataset.theme = v;
+  else delete document.documentElement.dataset.theme;
+}
+
+function errorMessage(err) {
+  const code = err?.code || '';
+  if (code.includes('permission-denied')) return 'ไม่มีสิทธิ์เข้าถึงข้อมูล — ตรวจสอบ Firestore Security Rules';
+  if (code === 'auth/unauthorized-domain')
+    return 'โดเมนนี้ยังไม่ได้รับอนุญาต — เพิ่มใน Firebase › Authentication › Settings › Authorized domains';
+  if (code === 'auth/operation-not-allowed' || code === 'auth/configuration-not-found')
+    return 'ยังไม่ได้เปิดการเข้าสู่ระบบด้วย Google ใน Firebase Authentication';
+  if (code === 'auth/network-request-failed' || code === 'unavailable')
+    return 'เชื่อมต่ออินเทอร์เน็ตไม่ได้ — ข้อมูลจะซิงก์เมื่อกลับมาออนไลน์';
+  if (err?.name === 'QuotaExceededError') return 'พื้นที่เก็บข้อมูลในเบราว์เซอร์เต็ม';
+  return `เกิดข้อผิดพลาด: ${err?.message || err}`;
+}
+
+// ---------- Toast ----------
+let toastTimer;
+function toast(msg, { action, onAction } = {}) {
+  const el = $('#toast');
+  el.innerHTML = `<span>${esc(msg)}</span>${action ? `<button type="button" class="toast-action">${esc(action)}</button>` : ''}`;
+  el.hidden = false;
+  const hide = () => {
+    el.hidden = true;
+  };
+  if (action) {
+    $('.toast-action', el).addEventListener('click', () => {
+      onAction();
+      hide();
+    });
+  }
+  clearTimeout(toastTimer);
+  toastTimer = setTimeout(hide, action ? 6000 : 3000);
+}
+
+// ---------- เมนู ----------
+function toggleMenu(open) {
+  const menu = $('#menu');
+  const next = open ?? menu.hidden;
+  menu.hidden = !next;
+  $('#menu-btn').setAttribute('aria-expanded', String(next));
+}
+
+const isTyping = () => {
+  const el = document.activeElement;
+  return !!el && (el.isContentEditable || ['INPUT', 'TEXTAREA', 'SELECT'].includes(el.tagName));
+};
+
+// ---------- ผูกเหตุการณ์ ----------
+const actions = {
+  add: () => openTaskDialog(),
+  'add-on': (el) => openTaskDialog({ date: el.dataset.date }),
+  edit: (el, id) => {
+    const t = store.get(id);
+    if (t) openTaskDialog({ task: t });
+  },
+  toggle: (el, id) => toggleTask(id),
+  delete: (el, id) => deleteTask(id),
+  'delete-from-dialog': () => {
+    const id = state.editingId;
+    closeDialog();
+    deleteTask(id);
+  },
+  'close-dialog': closeDialog,
+  'set-status': (el) => {
+    state.filter.status = el.dataset.status;
+    saveFilter();
+    render();
+  },
+  'goto-list': (el) => {
+    state.filter.status = el.dataset.status;
+    state.filter.q = '';
+    state.filter.tag = '';
+    saveFilter();
+    setView('list');
+  },
+  'goto-calendar': () => {
+    state.cal.selected = U.todayISO();
+    state.cal.cursor = new Date();
+    setView('calendar');
+  },
+  'select-day': (el) => {
+    const d = U.parseISODate(el.dataset.date);
+    state.cal.selected = el.dataset.date;
+    if (d.getMonth() !== state.cal.cursor.getMonth()) state.cal.cursor = new Date(d.getFullYear(), d.getMonth(), 1);
+    render();
+  },
+  'cal-prev': () => shiftCal(-1),
+  'cal-next': () => shiftCal(1),
+  'cal-today': () => {
+    state.cal.cursor = new Date();
+    state.cal.selected = U.todayISO();
+    render();
+  },
+  'cal-mode': (el) => {
+    state.cal.mode = el.dataset.mode;
+    // ให้สัปดาห์/เดือนที่แสดงตรงกับวันที่เลือกไว้
+    state.cal.cursor = U.parseISODate(state.cal.selected);
+    savePrefs({ calMode: state.cal.mode });
+    render();
+  },
+  theme: (el) => {
+    savePrefs({ theme: el.dataset.themeValue });
+    applyTheme(el.dataset.themeValue);
+    renderAccount();
+  },
+  export: () => {
+    toggleMenu(false);
+    exportJSON();
+  },
+  import: () => {
+    toggleMenu(false);
+    $('#import-file').click();
+  },
+  'sign-in': signIn,
+  'sign-out': () => {
+    toggleMenu(false);
+    store.signOut();
+  },
+  'dismiss-banner': () => {
+    savePrefs({ hideLocalBanner: true });
+    renderBanner();
+  },
+};
+
+function bindEvents() {
+  document.addEventListener('click', (e) => {
+    if (!e.target.closest('.menu-wrap')) toggleMenu(false);
+
+    const tab = e.target.closest('.tab');
+    if (tab) return setView(tab.dataset.view);
+
+    if (e.target.closest('#menu-btn')) return toggleMenu();
+
+    const el = e.target.closest('[data-action]');
+    if (!el || !store) return;
+    const fn = actions[el.dataset.action];
+    if (fn) fn(el, el.closest('[data-id]')?.dataset.id, e);
+  });
+
+  document.addEventListener('keydown', (e) => {
+    if (e.key === 'Escape') toggleMenu(false);
+    // เซลล์ปฏิทินเป็น div role=button: รองรับ Enter / Space
+    if ((e.key === 'Enter' || e.key === ' ') && e.target.matches?.('.cal-cell')) {
+      e.preventDefault();
+      e.target.click();
+    }
+    // กด N เพื่อเพิ่มงาน
+    if (e.key.toLowerCase() === 'n' && !e.ctrlKey && !e.metaKey && !e.altKey && !isTyping() && !dialog.open) {
+      e.preventDefault();
+      openTaskDialog();
+    }
+  });
+
+  document.addEventListener('submit', (e) => {
+    if (e.target.id === 'quick-add') quickAdd(e);
+  });
+  form.addEventListener('submit', submitTaskForm);
+  form.elements.title.addEventListener('input', () => {
+    $('.field-error', form).hidden = true;
+  });
+  // คลิกพื้นหลังเพื่อปิด
+  dialog.addEventListener('click', (e) => {
+    if (e.target === dialog) closeDialog();
+  });
+  dialog.addEventListener('close', () => {
+    state.editingId = null;
+  });
+
+  document.addEventListener('input', (e) => {
+    if (e.target.id === 'search-input') {
+      state.filter.q = e.target.value;
+      $('#list-results').innerHTML = listResultsHTML();
+    }
+  });
+  document.addEventListener('change', (e) => {
+    const id = e.target.id;
+    if (id === 'sort-select') {
+      state.filter.sort = e.target.value;
+      saveFilter();
+      render();
+    } else if (id === 'tag-select') {
+      state.filter.tag = e.target.value;
+      saveFilter();
+      render();
+    } else if (id === 'quick-when') {
+      state.quickWhen = e.target.value;
+    } else if (id === 'import-file') {
+      const file = e.target.files?.[0];
+      e.target.value = '';
+      if (file) importJSON(file);
+    }
+  });
+}
+
+init();

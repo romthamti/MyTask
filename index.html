@@ -1,0 +1,143 @@
+<!doctype html>
+<html lang="th">
+<head>
+  <meta charset="utf-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover" />
+  <title>MyTodo</title>
+  <meta name="description" content="จัดการงาน ตารางงาน และ To-do list ส่วนตัว" />
+  <meta name="theme-color" content="#4f46e5" />
+  <link rel="icon" href="data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 32 32'%3E%3Crect width='32' height='32' rx='8' fill='%234f46e5'/%3E%3Cpath d='M9 16.5l4.5 4.5L23 11.5' fill='none' stroke='white' stroke-width='3' stroke-linecap='round' stroke-linejoin='round'/%3E%3C/svg%3E" />
+  <link rel="preconnect" href="https://fonts.googleapis.com" />
+  <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
+  <link href="https://fonts.googleapis.com/css2?family=Noto+Sans+Thai:wght@400;500;600;700&display=swap" rel="stylesheet" />
+  <link rel="stylesheet" href="css/style.css" />
+  <script>
+    // ตั้งธีมก่อนหน้าเว็บแสดง เพื่อไม่ให้กระพริบ
+    try {
+      const t = JSON.parse(localStorage.getItem('mytodo.prefs') || '{}').theme;
+      if (t === 'light' || t === 'dark') document.documentElement.dataset.theme = t;
+    } catch {}
+  </script>
+</head>
+<body>
+  <header class="topbar">
+    <div class="brand">
+      <span class="brand-mark" aria-hidden="true">
+        <svg viewBox="0 0 24 24"><path d="M6 12.5l4 4L18 8.5" /></svg>
+      </span>
+      <span>MyTodo</span>
+    </div>
+
+    <nav class="tabs" aria-label="มุมมอง">
+      <button class="tab" data-view="dashboard" type="button">
+        <svg viewBox="0 0 24 24" aria-hidden="true"><path d="M4 11l8-7 8 7v8a1 1 0 0 1-1 1h-4v-6H9v6H5a1 1 0 0 1-1-1z" /></svg>
+        <span>ภาพรวม</span>
+      </button>
+      <button class="tab" data-view="list" type="button">
+        <svg viewBox="0 0 24 24" aria-hidden="true"><path d="M9 6h11M9 12h11M9 18h11M4 6h1M4 12h1M4 18h1" /></svg>
+        <span>รายการงาน</span>
+      </button>
+      <button class="tab" data-view="calendar" type="button">
+        <svg viewBox="0 0 24 24" aria-hidden="true"><path d="M4 7a2 2 0 0 1 2-2h12a2 2 0 0 1 2 2v12a2 2 0 0 1-2 2H6a2 2 0 0 1-2-2zM4 10h16M8 3v4M16 3v4" /></svg>
+        <span>ตารางงาน</span>
+      </button>
+    </nav>
+
+    <div class="top-actions">
+      <button class="btn btn-primary requires-auth" type="button" data-action="add" title="เพิ่มงาน (N)">
+        <svg viewBox="0 0 24 24" aria-hidden="true"><path d="M12 5v14M5 12h14" /></svg>
+        <span class="btn-label">เพิ่มงาน</span>
+      </button>
+      <div class="menu-wrap">
+        <button class="icon-btn" type="button" id="menu-btn" aria-haspopup="true" aria-expanded="false" aria-label="เมนู">
+          <svg viewBox="0 0 24 24" aria-hidden="true" style="fill: currentColor; stroke: none"><circle cx="5" cy="12" r="2" /><circle cx="12" cy="12" r="2" /><circle cx="19" cy="12" r="2" /></svg>
+        </button>
+        <div class="menu" id="menu" hidden>
+          <div class="menu-section" id="account"></div>
+          <div class="menu-section">
+            <div class="menu-label">ธีม</div>
+            <div class="segmented" role="group" aria-label="ธีม">
+              <button type="button" data-action="theme" data-theme-value="auto">อัตโนมัติ</button>
+              <button type="button" data-action="theme" data-theme-value="light">สว่าง</button>
+              <button type="button" data-action="theme" data-theme-value="dark">มืด</button>
+            </div>
+          </div>
+          <div class="menu-section requires-auth">
+            <div class="menu-label">สำรองข้อมูล</div>
+            <button class="menu-item" type="button" data-action="export">ส่งออกไฟล์ JSON</button>
+            <button class="menu-item" type="button" data-action="import">นำเข้าไฟล์ JSON</button>
+          </div>
+        </div>
+      </div>
+    </div>
+  </header>
+
+  <div id="banner"></div>
+  <main id="view" class="view" tabindex="-1"></main>
+
+  <dialog id="task-dialog" aria-labelledby="task-dialog-title">
+    <form id="task-form" novalidate>
+      <header class="dialog-head">
+        <h2 id="task-dialog-title">เพิ่มงาน</h2>
+        <button class="icon-btn" type="button" data-action="close-dialog" aria-label="ปิด">
+          <svg viewBox="0 0 24 24" aria-hidden="true"><path d="M6 6l12 12M18 6L6 18" /></svg>
+        </button>
+      </header>
+
+      <label class="field">
+        <span>ชื่องาน</span>
+        <input name="title" type="text" maxlength="200" required autocomplete="off" placeholder="ต้องทำอะไร?" />
+        <small class="field-error" hidden>กรุณาใส่ชื่องาน</small>
+      </label>
+
+      <label class="field">
+        <span>รายละเอียด</span>
+        <textarea name="description" rows="3" maxlength="5000" placeholder="โน้ตเพิ่มเติม (ไม่ใส่ก็ได้)"></textarea>
+      </label>
+
+      <div class="field-row">
+        <label class="field">
+          <span>วันครบกำหนด</span>
+          <input name="dueDate" type="date" />
+        </label>
+        <label class="field">
+          <span>เวลา</span>
+          <input name="dueTime" type="time" />
+        </label>
+      </div>
+
+      <fieldset class="field">
+        <legend>ความสำคัญ</legend>
+        <div class="segmented prio-picker">
+          <label><input type="radio" name="priority" value="high" /><span class="prio-high">สูง</span></label>
+          <label><input type="radio" name="priority" value="medium" /><span class="prio-medium">กลาง</span></label>
+          <label><input type="radio" name="priority" value="low" /><span class="prio-low">ต่ำ</span></label>
+        </div>
+      </fieldset>
+
+      <label class="field">
+        <span>แท็ก</span>
+        <input name="tags" type="text" list="tag-options" autocomplete="off" placeholder="เช่น งาน, บ้าน (คั่นด้วยจุลภาค)" />
+        <datalist id="tag-options"></datalist>
+      </label>
+
+      <label class="check-field edit-only">
+        <input name="done" type="checkbox" />
+        <span>ทำเสร็จแล้ว</span>
+      </label>
+
+      <footer class="dialog-foot">
+        <button class="btn btn-danger-ghost edit-only" type="button" data-action="delete-from-dialog">ลบงาน</button>
+        <span class="spacer"></span>
+        <button class="btn" type="button" data-action="close-dialog">ยกเลิก</button>
+        <button class="btn btn-primary" type="submit">บันทึก</button>
+      </footer>
+    </form>
+  </dialog>
+
+  <input type="file" id="import-file" accept="application/json,.json" hidden />
+  <div id="toast" class="toast" role="status" aria-live="polite" hidden></div>
+
+  <script type="module" src="js/app.js"></script>
+</body>
+</html>
