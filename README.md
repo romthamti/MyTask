@@ -41,7 +41,7 @@ python -m http.server 8000
    - คัดลอกค่าใน `firebaseConfig` มาวางใน `js/config.js`
 3. **เปิด Authentication:** เมนู Build › Authentication › Get started › Sign-in method › **Google** › Enable › Save
 4. **เพิ่มโดเมนที่อนุญาต:** Authentication › Settings › **Authorized domains** › Add domain
-   - เพิ่ม `<username>.github.io` (`localhost` มีให้อยู่แล้ว)
+   - เพิ่ม `romthamti.github.io` (`localhost` มีให้อยู่แล้ว)
 5. **สร้างฐานข้อมูล:** Build › Firestore Database › Create database › เลือก location `asia-southeast1` (สิงคโปร์) › Start in **production mode**
 6. **ตั้ง Security Rules:** Firestore › แท็บ **Rules** › วางเนื้อหาไฟล์ `firestore.rules` ทั้งไฟล์ › **Publish**
    - ถ้าอยากให้เข้าได้แค่อีเมลของคุณคนเดียว ให้แก้ฟังก์ชัน `isOwner` ตามคอมเมนต์ในไฟล์
@@ -49,14 +49,14 @@ python -m http.server 8000
 > ค่าใน `config.js` เปิดเผยได้ ไม่ใช่รหัสลับ ข้อมูลจะปลอดภัยเพราะ Security Rules อนุญาตให้แต่ละบัญชีอ่านและเขียนได้เฉพาะงานของตัวเอง
 
 ## ขั้นที่ 3: ขึ้น GitHub Pages
-1. สร้าง repo ใหม่ที่ https://github.com/new (เช่นชื่อ `MyTodoList`) ตั้งเป็น **Public** และ**ไม่ต้อง**ติ๊กสร้าง README
+1. สร้าง repo ใหม่ที่ https://github.com/new (เช่นชื่อ `MyTask`) ตั้งเป็น **Public** และ**ไม่ต้อง**ติ๊กสร้าง README
 2. push โค้ดขึ้นไป:
    ```bash
-   git remote add origin https://github.com/<username>/MyTodoList.git
+   git remote add origin https://github.com/romthamti/MyTask.git
    git push -u origin main
    ```
 3. ใน repo ไปที่ **Settings › Pages** ตรง Source เลือก **Deploy from a branch** › Branch `main` / `/ (root)` › Save
-4. รอประมาณ 1–2 นาที เว็บจะอยู่ที่ `https://<username>.github.io/MyTodoList/`
+4. รอประมาณ 1–2 นาที เว็บจะอยู่ที่ https://romthamti.github.io/MyTask/
 
 แก้โค้ดครั้งต่อไปแค่ `git add . && git commit -m "..." && git push` แล้วเว็บจะอัปเดตเอง
 
