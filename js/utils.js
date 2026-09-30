@@ -63,14 +63,18 @@ export const PRIORITIES = {
 // ทำให้ข้อมูลงานมีรูปแบบเดียวกันเสมอ (ใช้ทั้งตอนบันทึกและตอนนำเข้า)
 export function normalizeTask(t = {}) {
   const now = Date.now();
-  const done = !!t.done;
+  const done = t.type !== 'event' && !!t.done;
   return {
     // id ต้องใช้เป็นชื่อเอกสาร Firestore ได้ (ห้ามมี /)
     id: typeof t.id === 'string' && /^[\w-]{1,64}$/.test(t.id) ? t.id : uid(),
+    // task = งานที่ต้องทำ (ติ๊กเสร็จได้) · event = กิจกรรม/นัดหมาย (มีวันเวลา ไม่ต้องติ๊ก)
+    type: t.type === 'event' ? 'event' : 'task',
     title: String(t.title ?? '').trim().slice(0, 200),
     description: String(t.description ?? '').slice(0, 5000),
     dueDate: /^\d{4}-\d{2}-\d{2}$/.test(t.dueDate) ? t.dueDate : null,
     dueTime: /^\d{2}:\d{2}$/.test(t.dueTime) ? t.dueTime : '',
+    endTime: /^\d{2}:\d{2}$/.test(t.endTime) ? t.endTime : '',
+    location: String(t.location ?? '').trim().slice(0, 200),
     priority: PRIORITIES[t.priority] ? t.priority : 'medium',
     tags: Array.isArray(t.tags)
       ? [...new Set(t.tags.map((x) => String(x).trim().replace(/^#/, '')).filter(Boolean))].slice(0, 20)
@@ -82,8 +86,23 @@ export function normalizeTask(t = {}) {
   };
 }
 
+export const isEvent = (t) => t.type === 'event';
+
+// กิจกรรมที่ผ่านไปแล้ว (ดูจากเวลาสิ้นสุด ถ้าไม่มีใช้เวลาเริ่ม ถ้าไม่มีเวลาเลยถือว่าทั้งวัน)
+export function isPastEvent(t, today = todayISO(), now = nowHHMM()) {
+  if (!isEvent(t) || !t.dueDate) return false;
+  if (t.dueDate < today) return true;
+  const end = t.endTime || t.dueTime;
+  return t.dueDate === today && !!end && end <= now;
+}
+
+// "จบแล้ว": งานที่ติ๊กเสร็จ หรือกิจกรรมที่ผ่านไปแล้ว
+export const isFinished = (t) => (isEvent(t) ? isPastEvent(t) : t.done);
+
+export const timeRange = (t) => [t.dueTime, t.endTime].filter(Boolean).join('–');
+
 export function isOverdue(t, today = todayISO(), now = nowHHMM()) {
-  if (t.done || !t.dueDate) return false;
+  if (isEvent(t) || t.done || !t.dueDate) return false;
   if (t.dueDate < today) return true;
   return t.dueDate === today && !!t.dueTime && t.dueTime < now;
 }
@@ -91,7 +110,7 @@ export function isOverdue(t, today = todayISO(), now = nowHHMM()) {
 // เรียง: เลยกำหนดก่อน → วันที่ → งานที่มีเวลาก่อน → ความสำคัญ → สร้างก่อน
 export function compareByDue(a, b) {
   return (
-    (a.done - b.done) ||
+    (isFinished(a) - isFinished(b)) ||
     (isOverdue(b) - isOverdue(a)) ||
     ((a.dueDate ? 0 : 1) - (b.dueDate ? 0 : 1)) ||
     (a.dueDate || '').localeCompare(b.dueDate || '') ||
@@ -103,5 +122,5 @@ export function compareByDue(a, b) {
 }
 
 export function compareByPriority(a, b) {
-  return (a.done - b.done) || (PRIORITIES[a.priority].rank - PRIORITIES[b.priority].rank) || compareByDue(a, b);
+  return (isFinished(a) - isFinished(b)) || (PRIORITIES[a.priority].rank - PRIORITIES[b.priority].rank) || compareByDue(a, b);
 }

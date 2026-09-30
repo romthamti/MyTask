@@ -44,9 +44,9 @@
     </nav>
 
     <div class="top-actions">
-      <button class="btn btn-primary requires-auth" type="button" data-action="add" title="เพิ่มงาน (N)">
+      <button class="btn btn-primary requires-auth" type="button" data-action="add" title="เพิ่มงาน (N) · เพิ่มกิจกรรม (E)">
         <svg viewBox="0 0 24 24" aria-hidden="true"><path d="M12 5v14M5 12h14" /></svg>
-        <span class="btn-label">เพิ่มงาน</span>
+        <span class="btn-label">เพิ่ม</span>
       </button>
       <div class="menu-wrap">
         <button class="icon-btn" type="button" id="menu-btn" aria-haspopup="true" aria-expanded="false" aria-label="เมนู">
@@ -84,10 +84,16 @@
         </button>
       </header>
 
+      <div class="segmented type-picker" role="radiogroup" aria-label="ประเภท">
+        <label><input type="radio" name="type" value="task" /><span>งาน (To-do)</span></label>
+        <label><input type="radio" name="type" value="event" /><span>กิจกรรม / นัดหมาย</span></label>
+      </div>
+
       <label class="field">
-        <span>ชื่องาน</span>
+        <span class="task-only">ชื่องาน</span>
+        <span class="event-only">ชื่อกิจกรรม</span>
         <input name="title" type="text" maxlength="200" required autocomplete="off" placeholder="ต้องทำอะไร?" />
-        <small class="field-error" hidden>กรุณาใส่ชื่องาน</small>
+        <small class="field-error" hidden>กรุณาใส่ชื่อ</small>
       </label>
 
       <label class="field">
@@ -97,16 +103,30 @@
 
       <div class="field-row">
         <label class="field">
-          <span>วันครบกำหนด</span>
+          <span class="task-only">วันครบกำหนด</span>
+          <span class="event-only">วันที่</span>
           <input name="dueDate" type="date" />
+          <small class="field-error date-error" hidden>กรุณาเลือกวันที่</small>
         </label>
         <label class="field">
-          <span>เวลา</span>
+          <span class="task-only">เวลา</span>
+          <span class="event-only">เริ่ม</span>
           <input name="dueTime" type="time" />
         </label>
       </div>
 
-      <fieldset class="field">
+      <div class="field-row event-only">
+        <label class="field">
+          <span>สถานที่</span>
+          <input name="location" type="text" maxlength="200" autocomplete="off" placeholder="ไม่ใส่ก็ได้" />
+        </label>
+        <label class="field">
+          <span>สิ้นสุด</span>
+          <input name="endTime" type="time" />
+        </label>
+      </div>
+
+      <fieldset class="field task-only">
         <legend>ความสำคัญ</legend>
         <div class="segmented prio-picker">
           <label><input type="radio" name="priority" value="high" /><span class="prio-high">สูง</span></label>
@@ -121,13 +141,13 @@
         <datalist id="tag-options"></datalist>
       </label>
 
-      <label class="check-field edit-only">
+      <label class="check-field edit-only task-only">
         <input name="done" type="checkbox" />
         <span>ทำเสร็จแล้ว</span>
       </label>
 
       <footer class="dialog-foot">
-        <button class="btn btn-danger-ghost edit-only" type="button" data-action="delete-from-dialog">ลบงาน</button>
+        <button class="btn btn-danger-ghost edit-only" type="button" data-action="delete-from-dialog">ลบ</button>
         <span class="spacer"></span>
         <button class="btn" type="button" data-action="close-dialog">ยกเลิก</button>
         <button class="btn btn-primary" type="submit">บันทึก</button>

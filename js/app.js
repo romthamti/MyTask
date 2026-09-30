@@ -17,6 +17,7 @@ const ICONS = {
   search: '<path d="M11 18a7 7 0 1 0 0-14 7 7 0 0 0 0 14zM20 20l-4-4"/>',
   close: '<path d="M6 6l12 12M18 6L6 18"/>',
   inbox: '<path d="M4 13l2.5-7h11l2.5 7v5a1 1 0 0 1-1 1H5a1 1 0 0 1-1-1zM4 13h5l1 2h4l1-2h5"/>',
+  pin: '<path d="M12 21s-7-6.2-7-11.5a7 7 0 0 1 14 0C19 14.8 12 21 12 21zM12 12a2.5 2.5 0 1 0 0-5 2.5 2.5 0 0 0 0 5z"/>',
 };
 const icon = (name) => `<svg viewBox="0 0 24 24" aria-hidden="true">${ICONS[name]}</svg>`;
 
@@ -43,6 +44,11 @@ const STATUSES = [
   ['done', 'เสร็จแล้ว'],
   ['all', 'ทั้งหมด'],
 ];
+const KINDS = [
+  ['all', 'งานและกิจกรรม'],
+  ['task', 'เฉพาะงาน'],
+  ['event', 'เฉพาะกิจกรรม'],
+];
 const SORTS = [
   ['due', 'วันครบกำหนด'],
   ['priority', 'ความสำคัญ'],
@@ -57,13 +63,15 @@ const state = {
     status: STATUSES.some(([v]) => v === savedFilter.status) ? savedFilter.status : 'pending',
     sort: SORTS.some(([v]) => v === savedFilter.sort) ? savedFilter.sort : 'due',
     tag: typeof savedFilter.tag === 'string' ? savedFilter.tag : '',
+    kind: KINDS.some(([v]) => v === savedFilter.kind) ? savedFilter.kind : 'all',
     q: '',
   },
   quickWhen: '',
   cal: { mode: prefs.calMode === 'week' ? 'week' : 'month', cursor: new Date(), selected: U.todayISO() },
   editingId: null,
 };
-const saveFilter = () => savePrefs({ filter: { status: state.filter.status, sort: state.filter.sort, tag: state.filter.tag } });
+const saveFilter = () =>
+  savePrefs({ filter: { status: state.filter.status, sort: state.filter.sort, tag: state.filter.tag, kind: state.filter.kind } });
 
 let store = null;
 const dialog = $('#task-dialog');
@@ -205,27 +213,35 @@ function emptyHTML(title, text, withAdd = true) {
 
 // ---------- ส่วนประกอบรายการงาน ----------
 function taskItemHTML(t, { showDate = true } = {}) {
+  const event = U.isEvent(t);
   const overdue = U.isOverdue(t);
   const meta = [];
-  if (t.dueDate && (showDate || t.dueTime)) {
-    const label = [showDate ? U.relativeDateLabel(t.dueDate) : '', t.dueTime].filter(Boolean).join(' · ');
+  if (event) meta.push('<span class="kind-badge">กิจกรรม</span>');
+  const time = event ? U.timeRange(t) || (showDate ? '' : 'ทั้งวัน') : t.dueTime;
+  if (t.dueDate && (showDate || time)) {
+    const label = [showDate ? U.relativeDateLabel(t.dueDate) : '', time].filter(Boolean).join(' · ');
     meta.push(`<span class="meta${overdue ? ' is-overdue' : ''}">${icon(showDate ? 'calendar' : 'clock')}${label}</span>`);
   }
-  if (t.priority !== 'medium') {
+  if (t.location) meta.push(`<span class="meta">${icon('pin')}${esc(t.location)}</span>`);
+  if (!event && t.priority !== 'medium') {
     meta.push(`<span class="prio-badge prio-${t.priority}">${U.PRIORITIES[t.priority].label}</span>`);
   }
   if (t.description) meta.push(`<span class="meta" title="มีรายละเอียด">${icon('note')}</span>`);
   for (const tag of t.tags) meta.push(`<span class="tag">#${esc(tag)}</span>`);
 
+  const lead = event
+    ? `<span class="event-mark" aria-hidden="true">${icon('calendar')}</span>`
+    : `<button class="check" type="button" data-action="toggle" aria-pressed="${t.done}"
+        aria-label="${t.done ? 'ทำเครื่องหมายว่ายังไม่เสร็จ' : 'ทำเครื่องหมายว่าเสร็จแล้ว'}">${icon('check')}</button>`;
+  const cls = event ? `is-event${U.isPastEvent(t) ? ' is-past' : ''}` : `prio-${t.priority}${t.done ? ' is-done' : ''}`;
   return `
-    <li class="task prio-${t.priority}${t.done ? ' is-done' : ''}" data-id="${esc(t.id)}">
-      <button class="check" type="button" data-action="toggle" aria-pressed="${t.done}"
-        aria-label="${t.done ? 'ทำเครื่องหมายว่ายังไม่เสร็จ' : 'ทำเครื่องหมายว่าเสร็จแล้ว'}">${icon('check')}</button>
+    <li class="task ${cls}" data-id="${esc(t.id)}">
+      ${lead}
       <button class="task-main" type="button" data-action="edit">
         <span class="task-title">${esc(t.title)}</span>
         ${meta.length ? `<span class="task-meta">${meta.join('')}</span>` : ''}
       </button>
-      <button class="icon-btn task-del" type="button" data-action="delete" aria-label="ลบงาน">${icon('trash')}</button>
+      <button class="icon-btn task-del" type="button" data-action="delete" aria-label="ลบ">${icon('trash')}</button>
     </li>`;
 }
 const taskListHTML = (list, opts) => `<ul class="task-list">${list.map((t) => taskItemHTML(t, opts)).join('')}</ul>`;
@@ -244,19 +260,26 @@ function dashboardView() {
       <h1>${greeting}</h1>
     </div>`;
 
-  const tasks = state.tasks;
-  if (!tasks.length) return head + emptyHTML('ยังไม่มีงาน', 'เริ่มจากเพิ่มงานแรกของคุณ แล้วจัดตารางได้ในหน้า "ตารางงาน"');
+  const items = state.tasks;
+  if (!items.length) return head + emptyHTML('ยังไม่มีงาน', 'เริ่มจากเพิ่มงานหรือกิจกรรมแรกของคุณ แล้วจัดตารางได้ในหน้า "ตารางงาน"');
 
+  // สถิติ/ความคืบหน้านับเฉพาะงาน ส่วนรายการวันนี้/7 วันแสดงกิจกรรมด้วย
+  const tasks = items.filter((t) => !U.isEvent(t));
   const today = U.todayISO();
   const in7 = U.toISODate(U.addDays(now, 7));
   const pending = tasks.filter((t) => !t.done);
   const overdue = pending.filter((t) => U.isOverdue(t)).sort(U.compareByDue);
-  const todayList = tasks.filter((t) => t.dueDate === today && !U.isOverdue(t)).sort(U.compareByDue);
-  const todayDone = todayList.filter((t) => t.done).length;
-  const upcoming = pending.filter((t) => t.dueDate && t.dueDate > today && t.dueDate <= in7).sort(U.compareByDue);
+  const todayList = items.filter((t) => t.dueDate === today && !U.isOverdue(t)).sort(U.compareByDue);
+  const todayTasks = todayList.filter((t) => !U.isEvent(t));
+  const todayDone = todayTasks.filter((t) => t.done).length;
+  const todayEvents = todayList.length - todayTasks.length;
+  const upcoming = items
+    .filter((t) => !U.isFinished(t) && t.dueDate && t.dueDate > today && t.dueDate <= in7)
+    .sort(U.compareByDue);
+  const upcomingTasks = upcoming.filter((t) => !U.isEvent(t)).length;
   const noDate = pending.filter((t) => !t.dueDate).sort(U.compareByPriority);
   const doneCount = tasks.length - pending.length;
-  const pct = Math.round((doneCount / tasks.length) * 100);
+  const pct = tasks.length ? Math.round((doneCount / tasks.length) * 100) : 0;
 
   const panel = (title, list, { empty, showDate = true, tone = '', limit = 0 } = {}) => {
     const shown = limit ? list.slice(0, limit) : list;
@@ -264,7 +287,7 @@ function dashboardView() {
       <section class="panel${tone ? ` panel-${tone}` : ''}">
         <header class="panel-head"><h2>${title}</h2><span class="count">${list.length}</span></header>
         ${shown.length ? taskListHTML(shown, { showDate }) : `<p class="panel-empty">${empty}</p>`}
-        ${limit && list.length > limit ? `<button class="link-btn" type="button" data-action="goto-list" data-status="pending">ดูทั้งหมด ${list.length} งาน</button>` : ''}
+        ${limit && list.length > limit ? `<button class="link-btn" type="button" data-action="goto-list" data-status="pending">ดูทั้งหมด ${list.length} รายการ</button>` : ''}
       </section>`;
   };
 
@@ -273,8 +296,8 @@ function dashboardView() {
     <section class="stats">
       <button class="stat" type="button" data-action="goto-calendar">
         <span class="stat-label">งานวันนี้</span>
-        <span class="stat-value">${todayList.length - todayDone}</span>
-        <span class="stat-sub">เสร็จแล้ว ${todayDone} จาก ${todayList.length}</span>
+        <span class="stat-value">${todayTasks.length - todayDone}</span>
+        <span class="stat-sub">เสร็จแล้ว ${todayDone} จาก ${todayTasks.length}${todayEvents ? ` · กิจกรรม ${todayEvents}` : ''}</span>
       </button>
       <button class="stat${overdue.length ? ' stat-danger' : ''}" type="button" data-action="goto-list" data-status="overdue">
         <span class="stat-label">เลยกำหนด</span>
@@ -284,7 +307,7 @@ function dashboardView() {
       <button class="stat" type="button" data-action="goto-list" data-status="pending">
         <span class="stat-label">งานค้างทั้งหมด</span>
         <span class="stat-value">${pending.length}</span>
-        <span class="stat-sub">7 วันข้างหน้า ${upcoming.length} งาน</span>
+        <span class="stat-sub">7 วันข้างหน้า ${upcomingTasks} งาน</span>
       </button>
       <button class="stat" type="button" data-action="goto-list" data-status="done">
         <span class="stat-label">ความคืบหน้า</span>
@@ -295,22 +318,25 @@ function dashboardView() {
     </section>
     <div class="dash-grid">
       ${overdue.length ? panel('เลยกำหนด', overdue, { tone: 'danger' }) : ''}
-      ${panel('วันนี้', todayList, { empty: 'ไม่มีงานที่ครบกำหนดวันนี้', showDate: false })}
-      ${panel('7 วันข้างหน้า', upcoming, { empty: 'ยังไม่มีงานในสัปดาห์นี้' })}
+      ${panel('วันนี้', todayList, { empty: 'ไม่มีงานหรือกิจกรรมวันนี้', showDate: false })}
+      ${panel('7 วันข้างหน้า', upcoming, { empty: 'ยังไม่มีงานหรือกิจกรรมในสัปดาห์นี้' })}
       ${noDate.length ? panel('ไม่มีกำหนด', noDate, { limit: 5 }) : ''}
     </div>`;
 }
 
 // ---------- มุมมอง: รายการงาน ----------
+const ofKind = (list) =>
+  state.filter.kind === 'all' ? list : list.filter((t) => (state.filter.kind === 'event') === U.isEvent(t));
+
 function filteredTasks() {
   const { status, tag, q, sort } = state.filter;
   const needle = q.trim().toLowerCase();
-  const list = state.tasks.filter(
+  const list = ofKind(state.tasks).filter(
     (t) =>
       (status === 'all' ||
-        (status === 'done' ? t.done : status === 'overdue' ? U.isOverdue(t) : !t.done)) &&
+        (status === 'done' ? U.isFinished(t) : status === 'overdue' ? U.isOverdue(t) : !U.isFinished(t))) &&
       (!tag || t.tags.includes(tag)) &&
-      (!needle || [t.title, t.description, ...t.tags].some((s) => s.toLowerCase().includes(needle))),
+      (!needle || [t.title, t.description, t.location, ...t.tags].some((s) => s.toLowerCase().includes(needle))),
   );
   const cmp =
     sort === 'priority' ? U.compareByPriority : sort === 'created' ? (a, b) => b.createdAt - a.createdAt : U.compareByDue;
@@ -318,7 +344,7 @@ function filteredTasks() {
 }
 
 function groupOf(t) {
-  if (t.done && state.filter.status === 'all') return ['done', 'เสร็จแล้ว'];
+  if (U.isFinished(t) && state.filter.status === 'all') return ['done', 'เสร็จแล้ว / ผ่านไปแล้ว'];
   if (U.isOverdue(t)) return ['overdue', 'เลยกำหนด'];
   if (!t.dueDate) return ['none', 'ไม่มีกำหนด'];
   return [t.dueDate, `${U.relativeDateLabel(t.dueDate)} · ${U.F.weekdayLong.format(U.parseISODate(t.dueDate))}`];
@@ -327,7 +353,7 @@ function groupOf(t) {
 function listResultsHTML() {
   if (!state.tasks.length) return emptyHTML('ยังไม่มีงาน', 'พิมพ์ในช่องด้านบนแล้วกด Enter เพื่อเพิ่มงานได้ทันที', false);
   const list = filteredTasks();
-  if (!list.length) return emptyHTML('ไม่พบงาน', 'ลองเปลี่ยนตัวกรองหรือคำค้นหา', false);
+  if (!list.length) return emptyHTML('ไม่พบรายการ', 'ลองเปลี่ยนตัวกรองหรือคำค้นหา', false);
   if (state.filter.sort !== 'due') return taskListHTML(list);
 
   let html = '';
@@ -348,11 +374,12 @@ function listView() {
   const f = state.filter;
   const tags = allTags();
   if (f.tag && !tags.includes(f.tag)) f.tag = '';
+  const items = ofKind(state.tasks);
   const counts = {
-    pending: state.tasks.filter((t) => !t.done).length,
-    overdue: state.tasks.filter((t) => U.isOverdue(t)).length,
-    done: state.tasks.filter((t) => t.done).length,
-    all: state.tasks.length,
+    pending: items.filter((t) => !U.isFinished(t)).length,
+    overdue: items.filter((t) => U.isOverdue(t)).length,
+    done: items.filter((t) => U.isFinished(t)).length,
+    all: items.length,
   };
   const opt = (v, l, cur) => `<option value="${esc(v)}"${v === cur ? ' selected' : ''}>${esc(l)}</option>`;
 
@@ -367,11 +394,12 @@ function listView() {
       <button class="btn btn-primary" type="submit">เพิ่ม</button>
     </form>
     <div class="toolbar">
-      <label class="search">${icon('search')}<input id="search-input" type="search" placeholder="ค้นหางาน" value="${esc(f.q)}" aria-label="ค้นหางาน" /></label>
+      <label class="search">${icon('search')}<input id="search-input" type="search" placeholder="ค้นหา" value="${esc(f.q)}" aria-label="ค้นหางานและกิจกรรม" /></label>
       <div class="segmented" role="group" aria-label="สถานะ">
         ${STATUSES.map(([v, l]) => `<button type="button" data-action="set-status" data-status="${v}" aria-pressed="${f.status === v}">${l}<span class="seg-count">${counts[v]}</span></button>`).join('')}
       </div>
       <div class="selects">
+        <select id="kind-select" aria-label="ประเภท">${KINDS.map(([v, l]) => opt(v, l, f.kind)).join('')}</select>
         <select id="sort-select" aria-label="เรียงตาม">${SORTS.map(([v, l]) => opt(v, `เรียง: ${l}`, f.sort)).join('')}</select>
         <select id="tag-select" aria-label="กรองตามแท็ก">${opt('', 'ทุกแท็ก', f.tag)}${tags.map((t) => opt(t, `#${t}`, f.tag)).join('')}</select>
       </div>
@@ -441,18 +469,18 @@ function monthHTML(byDate) {
     const chips = list
       .slice(0, 3)
       .map(
-        (t) => `<button type="button" class="chip prio-${t.priority}${t.done ? ' is-done' : ''}${U.isOverdue(t) ? ' is-overdue' : ''}" data-action="edit" data-id="${esc(t.id)}" title="${esc(t.title)}">${t.dueTime ? `<b>${t.dueTime}</b> ` : ''}${esc(t.title)}</button>`,
+        (t) => `<button type="button" class="chip ${chipClass(t)}" data-action="edit" data-id="${esc(t.id)}" title="${esc(t.title)}">${t.dueTime ? `<b>${t.dueTime}</b> ` : ''}${esc(t.title)}</button>`,
       )
       .join('');
     const dots = list
       .slice(0, 4)
-      .map((t) => `<i class="dot prio-${t.priority}${t.done ? ' is-done' : ''}"></i>`)
+      .map((t) => `<i class="dot ${chipClass(t)}"></i>`)
       .join('');
     cells += `
       <div class="${cls}" role="button" tabindex="0" data-action="select-day" data-date="${iso}"
-        aria-label="${U.F.full.format(d)}${list.length ? ` มี ${list.length} งาน` : ''}">
+        aria-label="${U.F.full.format(d)}${list.length ? ` มี ${list.length} รายการ` : ''}">
         <span class="cal-num">${d.getDate()}</span>
-        <div class="cal-chips">${chips}${list.length > 3 ? `<span class="more">+${list.length - 3} งาน</span>` : ''}</div>
+        <div class="cal-chips">${chips}${list.length > 3 ? `<span class="more">+${list.length - 3} รายการ</span>` : ''}</div>
         <div class="cal-dots">${dots}</div>
       </div>`;
   }
@@ -466,11 +494,19 @@ function monthHTML(byDate) {
     <section class="panel day-panel">
       <header class="panel-head">
         <h2>${U.relativeDateLabel(selected) === 'วันนี้' ? 'วันนี้ · ' : ''}${U.F.full.format(U.parseISODate(selected))}</h2>
-        <button class="btn btn-sm" type="button" data-action="add-on" data-date="${selected}">${icon('plus')}เพิ่มงาน</button>
+        <div class="panel-actions">
+          <button class="btn btn-sm" type="button" data-action="add-on" data-date="${selected}">${icon('plus')}งาน</button>
+          <button class="btn btn-sm" type="button" data-action="add-event-on" data-date="${selected}">${icon('plus')}กิจกรรม</button>
+        </div>
       </header>
-      ${selList.length ? taskListHTML(selList, { showDate: false }) : '<p class="panel-empty">ไม่มีงานในวันนี้ — แตะ "เพิ่มงาน" เพื่อเพิ่ม</p>'}
+      ${selList.length ? taskListHTML(selList, { showDate: false }) : '<p class="panel-empty">ไม่มีงานหรือกิจกรรมในวันนี้</p>'}
     </section>`;
 }
+
+const chipClass = (t) =>
+  U.isEvent(t)
+    ? `is-event${U.isPastEvent(t) ? ' is-done' : ''}`
+    : `prio-${t.priority}${t.done ? ' is-done' : ''}${U.isOverdue(t) ? ' is-overdue' : ''}`;
 
 function weekHTML(byDate) {
   const start = U.startOfWeek(state.cal.cursor);
@@ -485,10 +521,13 @@ function weekHTML(byDate) {
         <header class="week-head">
           <span class="wd">${U.WEEKDAYS[i]}</span>
           <span class="wn">${d.getDate()}</span>
-          <span class="wc">${list.length ? `${list.length} งาน` : ''}</span>
+          <span class="wc">${list.length ? `${list.length} รายการ` : ''}</span>
         </header>
         ${list.length ? taskListHTML(list, { showDate: false }) : ''}
-        <button class="add-slot" type="button" data-action="add-on" data-date="${iso}">${icon('plus')}เพิ่ม</button>
+        <div class="add-slots">
+          <button class="add-slot" type="button" data-action="add-on" data-date="${iso}" aria-label="เพิ่มงาน">${icon('plus')}งาน</button>
+          <button class="add-slot" type="button" data-action="add-event-on" data-date="${iso}" aria-label="เพิ่มกิจกรรม">${icon('plus')}กิจกรรม</button>
+        </div>
       </section>`;
   }
   return `<div class="week">${cols}</div>`;
@@ -510,7 +549,7 @@ function shiftCal(n) {
 
 function toggleTask(id) {
   const t = store.get(id);
-  if (t) store.update(id, { done: !t.done });
+  if (t && !U.isEvent(t)) store.update(id, { done: !t.done });
 }
 
 function deleteTask(id) {
@@ -520,26 +559,52 @@ function deleteTask(id) {
   toast(`ลบ "${t.title}" แล้ว`, { action: 'เลิกทำ', onAction: () => store.put(t) });
 }
 
-function openTaskDialog({ task = null, date = '' } = {}) {
+function openTaskDialog({ task = null, date = '', type = 'task' } = {}) {
   if (!store || (store.mode === 'firebase' && !store.user)) return;
   toggleMenu(false);
   state.editingId = task?.id || null;
-  const t = task || { title: '', description: '', dueDate: date, dueTime: '', priority: 'medium', tags: [], done: false };
+  const t = task || {
+    type,
+    title: '',
+    description: '',
+    dueDate: date,
+    dueTime: '',
+    endTime: '',
+    location: '',
+    priority: 'medium',
+    tags: [],
+    done: false,
+  };
   const f = form.elements;
   form.reset();
   form.classList.toggle('is-edit', !!task);
-  $('#task-dialog-title').textContent = task ? 'แก้ไขงาน' : 'เพิ่มงาน';
+  f.type.value = t.type;
   f.title.value = t.title;
   f.description.value = t.description;
   f.dueDate.value = t.dueDate || '';
   f.dueTime.value = t.dueTime || '';
+  f.endTime.value = t.endTime || '';
+  f.location.value = t.location || '';
   f.priority.value = t.priority;
   f.tags.value = t.tags.join(', ');
   f.done.checked = t.done;
-  $('.field-error', form).hidden = true;
+  $$('.field-error', form).forEach((el) => (el.hidden = true));
+  f.endTime.setCustomValidity('');
+  syncDialogType();
   $('#tag-options').innerHTML = allTags().map((tag) => `<option value="${esc(tag)}"></option>`).join('');
   dialog.showModal();
   if (!task) f.title.focus();
+}
+
+// สลับช่องในฟอร์มตามประเภท (งาน / กิจกรรม)
+function syncDialogType() {
+  const f = form.elements;
+  const event = f.type.value === 'event';
+  form.dataset.type = event ? 'event' : 'task';
+  $('#task-dialog-title').textContent = `${state.editingId ? 'แก้ไข' : 'เพิ่ม'}${event ? 'กิจกรรม' : 'งาน'}`;
+  f.title.placeholder = event ? 'เช่น ประชุมทีม, นัดหมอ' : 'ต้องทำอะไร?';
+  // กิจกรรมต้องมีวันที่: ถ้ายังไม่ได้เลือก ใช้วันนี้
+  if (event && !f.dueDate.value) f.dueDate.value = U.todayISO();
 }
 
 function closeDialog() {
@@ -556,22 +621,34 @@ function submitTaskForm(e) {
     f.title.focus();
     return;
   }
+  const event = f.type.value === 'event';
   const dueTime = f.dueTime.value;
+  const endTime = event && dueTime ? f.endTime.value : '';
+  if (event && !f.dueDate.value) {
+    $('.date-error', form).hidden = false;
+    f.dueDate.focus();
+    return;
+  }
+  f.endTime.setCustomValidity(endTime && endTime <= dueTime ? 'เวลาสิ้นสุดต้องหลังเวลาเริ่ม' : '');
+  if (!f.endTime.reportValidity()) return;
   const data = {
+    type: event ? 'event' : 'task',
     title,
     description: f.description.value.trim(),
     // ใส่แค่เวลาโดยไม่ใส่วัน = วันนี้
     dueDate: f.dueDate.value || (dueTime ? U.todayISO() : null),
     dueTime,
-    priority: f.priority.value || 'medium',
+    endTime,
+    location: event ? f.location.value.trim() : '',
+    priority: event ? 'medium' : f.priority.value || 'medium',
     tags: f.tags.value.split(/[,，]/).map((s) => s.trim()).filter(Boolean),
   };
   if (state.editingId && store.get(state.editingId)) {
-    store.update(state.editingId, { ...data, done: f.done.checked });
+    store.update(state.editingId, { ...data, done: !event && f.done.checked });
     toast('บันทึกการแก้ไขแล้ว');
   } else {
     store.add(data);
-    toast('เพิ่มงานแล้ว');
+    toast(event ? 'เพิ่มกิจกรรมแล้ว' : 'เพิ่มงานแล้ว');
   }
   closeDialog();
 }
@@ -598,7 +675,7 @@ function exportJSON() {
   a.click();
   a.remove();
   setTimeout(() => URL.revokeObjectURL(url), 1000);
-  toast(`ส่งออก ${state.tasks.length} งานแล้ว`);
+  toast(`ส่งออก ${state.tasks.length} รายการแล้ว`);
 }
 
 async function importJSON(file) {
@@ -608,7 +685,7 @@ async function importJSON(file) {
     if (!Array.isArray(list)) throw new Error('bad format');
     const valid = list.filter((t) => t && typeof t === 'object' && String(t.title ?? '').trim());
     await store.importMany(valid);
-    toast(`นำเข้า ${valid.length} งานแล้ว`);
+    toast(`นำเข้า ${valid.length} รายการแล้ว`);
   } catch {
     toast('ไฟล์ไม่ถูกต้อง — ต้องเป็นไฟล์ JSON ที่ส่งออกจาก MyTodo');
   }
@@ -677,6 +754,7 @@ const isTyping = () => {
 const actions = {
   add: () => openTaskDialog(),
   'add-on': (el) => openTaskDialog({ date: el.dataset.date }),
+  'add-event-on': (el) => openTaskDialog({ date: el.dataset.date, type: 'event' }),
   edit: (el, id) => {
     const t = store.get(id);
     if (t) openTaskDialog({ task: t });
@@ -772,10 +850,11 @@ function bindEvents() {
       e.preventDefault();
       e.target.click();
     }
-    // กด N เพื่อเพิ่มงาน
-    if (e.key.toLowerCase() === 'n' && !e.ctrlKey && !e.metaKey && !e.altKey && !isTyping() && !dialog.open) {
+    // กด N เพื่อเพิ่มงาน · E เพื่อเพิ่มกิจกรรม
+    const key = e.key.toLowerCase();
+    if ((key === 'n' || key === 'e') && !e.ctrlKey && !e.metaKey && !e.altKey && !isTyping() && !dialog.open) {
       e.preventDefault();
-      openTaskDialog();
+      openTaskDialog({ type: key === 'e' ? 'event' : 'task' });
     }
   });
 
@@ -785,6 +864,13 @@ function bindEvents() {
   form.addEventListener('submit', submitTaskForm);
   form.elements.title.addEventListener('input', () => {
     $('.field-error', form).hidden = true;
+  });
+  form.elements.dueDate.addEventListener('input', () => {
+    $('.date-error', form).hidden = true;
+  });
+  form.elements.endTime.addEventListener('input', () => form.elements.endTime.setCustomValidity(''));
+  form.addEventListener('change', (e) => {
+    if (e.target.name === 'type') syncDialogType();
   });
   // คลิกพื้นหลังเพื่อปิด
   dialog.addEventListener('click', (e) => {
@@ -804,6 +890,10 @@ function bindEvents() {
     const id = e.target.id;
     if (id === 'sort-select') {
       state.filter.sort = e.target.value;
+      saveFilter();
+      render();
+    } else if (id === 'kind-select') {
+      state.filter.kind = e.target.value;
       saveFilter();
       render();
     } else if (id === 'tag-select') {
