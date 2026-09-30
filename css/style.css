@@ -1245,8 +1245,23 @@ dialog[open] {
   body {
     padding-bottom: calc(var(--bottombar-h) + env(safe-area-inset-bottom));
   }
+  /* backdrop-filter ทำให้ position:fixed ของแถบล่างอ้างอิง topbar แทนหน้าจอ จึงต้องปิดบนมือถือ */
   .topbar {
     gap: 8px;
+    height: 56px;
+    backdrop-filter: none;
+    background: var(--bg);
+  }
+  .brand {
+    margin-right: auto;
+  }
+  .banner {
+    font-size: 13px;
+    margin-top: 10px;
+    padding: 6px 4px 6px 12px;
+  }
+  #banner {
+    padding: 0 12px;
   }
   .btn-label {
     display: none;
@@ -1361,8 +1376,43 @@ dialog[open] {
   .field-row {
     grid-template-columns: minmax(0, 1fr) minmax(0, 1fr);
   }
+  /* ตัวอักษรในช่องกรอก < 16px ทำให้ iOS Safari ซูมหน้าจอเอง */
+  input,
+  select,
+  textarea {
+    font-size: 16px;
+  }
+  /* หน้าต่างงานเป็น bottom sheet */
+  dialog {
+    width: 100%;
+    max-width: 100%;
+    max-height: 92dvh;
+    margin: auto 0 0;
+    border-radius: 20px 20px 0 0;
+    border-bottom: 0;
+  }
+  dialog[open] {
+    animation: sheet-up 0.22s ease-out;
+  }
   #task-form {
-    padding: 16px;
+    padding: 16px 16px calc(16px + env(safe-area-inset-bottom));
+  }
+  .dialog-foot .btn {
+    height: 44px;
+  }
+  .dialog-foot .btn-primary {
+    flex: 1;
+  }
+}
+@keyframes sheet-up {
+  from {
+    transform: translateY(40px);
+    opacity: 0;
+  }
+}
+@media (hover: none) {
+  * {
+    -webkit-tap-highlight-color: transparent;
   }
 }
 
