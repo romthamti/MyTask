@@ -60,15 +60,26 @@ export const PRIORITIES = {
   low: { label: 'ต่ำ', rank: 2 },
 };
 
+// ประเภทของกิจกรรม (สีอยู่ใน css: --cat-<key>)
+export const EVENT_CATEGORIES = {
+  meeting: { label: 'ประชุม' },
+  appointment: { label: 'นัดหมาย' },
+  personal: { label: 'ส่วนตัว' },
+  travel: { label: 'เดินทาง' },
+  other: { label: 'อื่นๆ' },
+};
+
 // ทำให้ข้อมูลงานมีรูปแบบเดียวกันเสมอ (ใช้ทั้งตอนบันทึกและตอนนำเข้า)
 export function normalizeTask(t = {}) {
   const now = Date.now();
-  const done = t.type !== 'event' && !!t.done;
+  const event = t.type === 'event';
+  const done = !event && !!t.done;
   return {
     // id ต้องใช้เป็นชื่อเอกสาร Firestore ได้ (ห้ามมี /)
     id: typeof t.id === 'string' && /^[\w-]{1,64}$/.test(t.id) ? t.id : uid(),
     // task = งานที่ต้องทำ (ติ๊กเสร็จได้) · event = กิจกรรม/นัดหมาย (มีวันเวลา ไม่ต้องติ๊ก)
-    type: t.type === 'event' ? 'event' : 'task',
+    type: event ? 'event' : 'task',
+    category: event ? (EVENT_CATEGORIES[t.category] ? t.category : 'other') : '',
     title: String(t.title ?? '').trim().slice(0, 200),
     description: String(t.description ?? '').slice(0, 5000),
     dueDate: /^\d{4}-\d{2}-\d{2}$/.test(t.dueDate) ? t.dueDate : null,
@@ -94,6 +105,31 @@ export function isPastEvent(t, today = todayISO(), now = nowHHMM()) {
   if (t.dueDate < today) return true;
   const end = t.endTime || t.dueTime;
   return t.dueDate === today && !!end && end <= now;
+}
+
+// กิจกรรมที่กำลังดำเนินอยู่ (วันนี้ เริ่มแล้วแต่ยังไม่ถึงเวลาสิ้นสุด)
+export function isOngoingEvent(t, today = todayISO(), now = nowHHMM()) {
+  return isEvent(t) && t.dueDate === today && !!t.dueTime && !!t.endTime && t.dueTime <= now && now < t.endTime;
+}
+
+const toMinutes = (hhmm) => {
+  const [h, m] = hhmm.split(':').map(Number);
+  return h * 60 + m;
+};
+
+// ข้อความบอกว่ากิจกรรมจะเริ่มเมื่อไร เช่น "อีก 25 นาที", "พรุ่งนี้ · 09:00–10:00"
+export function eventWhenLabel(t) {
+  if (isOngoingEvent(t)) return `กำลังดำเนินอยู่ · ถึง ${t.endTime}`;
+  if (t.dueDate === todayISO()) {
+    if (!t.dueTime) return 'วันนี้ · ทั้งวัน';
+    const diff = toMinutes(t.dueTime) - toMinutes(nowHHMM());
+    if (diff > 0) {
+      const h = Math.floor(diff / 60);
+      const m = diff % 60;
+      return `อีก ${[h && `${h} ชม.`, m && `${m} นาที`].filter(Boolean).join(' ')} · ${timeRange(t)}`;
+    }
+  }
+  return [relativeDateLabel(t.dueDate), timeRange(t) || 'ทั้งวัน'].join(' · ');
 }
 
 // "จบแล้ว": งานที่ติ๊กเสร็จ หรือกิจกรรมที่ผ่านไปแล้ว

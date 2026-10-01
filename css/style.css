@@ -18,6 +18,11 @@
   --prio-medium: #e38a14;
   --prio-low: #6b7a90;
   --event: #0e8fa8;
+  --cat-meeting: #7c3aed;
+  --cat-appointment: #0e8fa8;
+  --cat-personal: #db2777;
+  --cat-travel: #15803d;
+  --cat-other: #6b7a90;
   --shadow: 0 1px 2px rgb(16 24 40 / 0.05), 0 1px 3px rgb(16 24 40 / 0.06);
   --shadow-lg: 0 12px 32px rgb(16 24 40 / 0.16);
   --radius: 14px;
@@ -46,7 +51,12 @@
     --prio-high: #f26d6d;
     --prio-medium: #f0a54a;
     --prio-low: #8d9ab0;
-  --event: #38bdd8;
+    --event: #38bdd8;
+    --cat-meeting: #a78bfa;
+    --cat-appointment: #38bdd8;
+    --cat-personal: #f472b6;
+    --cat-travel: #4ade80;
+    --cat-other: #8d9ab0;
     --shadow: 0 1px 2px rgb(0 0 0 / 0.3);
     --shadow-lg: 0 16px 40px rgb(0 0 0 / 0.5);
     color-scheme: dark;
@@ -71,6 +81,11 @@
   --prio-medium: #f0a54a;
   --prio-low: #8d9ab0;
   --event: #38bdd8;
+  --cat-meeting: #a78bfa;
+  --cat-appointment: #38bdd8;
+  --cat-personal: #f472b6;
+  --cat-travel: #4ade80;
+  --cat-other: #8d9ab0;
   --shadow: 0 1px 2px rgb(0 0 0 / 0.3);
   --shadow-lg: 0 16px 40px rgb(0 0 0 / 0.5);
   color-scheme: dark;
@@ -542,6 +557,81 @@ textarea:focus {
 }
 
 /* ---------- Dashboard ---------- */
+.dash-head {
+  display: flex;
+  align-items: flex-end;
+  justify-content: space-between;
+  flex-wrap: wrap;
+  gap: 12px;
+}
+.stat-text {
+  font-size: 18px;
+  font-weight: 600;
+  line-height: 1.35;
+  padding: 4px 0 2px;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+.stat-event .stat-label::before {
+  content: '';
+  display: inline-block;
+  width: 8px;
+  height: 8px;
+  margin-right: 6px;
+  border-radius: 3px;
+  background: var(--event);
+}
+.cat-rows {
+  list-style: none;
+  margin: 0;
+  padding: 0 0 4px;
+}
+.cat-row {
+  display: grid;
+  grid-template-columns: 76px minmax(0, 1fr) 28px;
+  align-items: center;
+  gap: 10px;
+  width: 100%;
+  padding: 8px 4px;
+  border: 0;
+  border-radius: var(--radius-sm);
+  background: none;
+  text-align: left;
+}
+.cat-row:hover {
+  background: var(--surface-2);
+}
+.cat-name {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  font-weight: 500;
+}
+.cat-name::before {
+  content: '';
+  width: 8px;
+  height: 8px;
+  border-radius: 3px;
+  background: var(--event);
+}
+.cat-bar {
+  height: 8px;
+  border-radius: 99px;
+  background: var(--surface-2);
+  overflow: hidden;
+}
+.cat-bar > span {
+  display: block;
+  height: 100%;
+  border-radius: inherit;
+  background: var(--event);
+}
+.cat-count {
+  text-align: right;
+  font-variant-numeric: tabular-nums;
+  color: var(--text-2);
+}
 .stats {
   display: grid;
   grid-template-columns: repeat(4, minmax(0, 1fr));
@@ -810,6 +900,31 @@ textarea:focus {
   border-radius: 99px;
   color: var(--event);
   background: color-mix(in srgb, var(--event) 13%, transparent);
+}
+
+/* ประเภทกิจกรรม: เปลี่ยนสี --event ของรายการนั้น ทุกส่วนที่ใช้ --event จะเปลี่ยนตาม */
+.cat-meeting {
+  --event: var(--cat-meeting);
+}
+.cat-appointment {
+  --event: var(--cat-appointment);
+}
+.cat-personal {
+  --event: var(--cat-personal);
+}
+.cat-travel {
+  --event: var(--cat-travel);
+}
+.cat-other {
+  --event: var(--cat-other);
+}
+.now-badge {
+  font-size: 12px;
+  font-weight: 600;
+  padding: 0 7px;
+  border-radius: 99px;
+  color: var(--on-accent);
+  background: var(--event);
 }
 
 /* ---------- List view ---------- */
@@ -1228,6 +1343,25 @@ dialog[open] {
 }
 .prio-picker .prio-low::before {
   background: var(--prio-low);
+}
+.cat-picker {
+  display: flex;
+  flex-wrap: wrap;
+}
+.cat-picker > label {
+  flex: 1 1 auto;
+  display: flex;
+}
+.cat-picker > label > span {
+  flex: 1;
+  justify-content: center;
+}
+.cat-picker > label > span::before {
+  content: '';
+  width: 8px;
+  height: 8px;
+  border-radius: 3px;
+  background: var(--event);
 }
 .check-field {
   display: flex;

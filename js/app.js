@@ -48,6 +48,7 @@ const KINDS = [
   ['all', 'งานและกิจกรรม'],
   ['task', 'เฉพาะงาน'],
   ['event', 'เฉพาะกิจกรรม'],
+  ...Object.entries(U.EVENT_CATEGORIES).map(([k, c]) => [`event:${k}`, `กิจกรรม: ${c.label}`]),
 ];
 const SORTS = [
   ['due', 'วันครบกำหนด'],
@@ -59,6 +60,7 @@ const savedFilter = prefs.filter || {};
 const state = {
   tasks: [],
   view: VIEWS.includes(prefs.view) ? prefs.view : 'dashboard',
+  dashMode: prefs.dashMode === 'event' ? 'event' : 'task',
   filter: {
     status: STATUSES.some(([v]) => v === savedFilter.status) ? savedFilter.status : 'pending',
     sort: SORTS.some(([v]) => v === savedFilter.sort) ? savedFilter.sort : 'due',
@@ -216,7 +218,8 @@ function taskItemHTML(t, { showDate = true } = {}) {
   const event = U.isEvent(t);
   const overdue = U.isOverdue(t);
   const meta = [];
-  if (event) meta.push('<span class="kind-badge">กิจกรรม</span>');
+  if (event) meta.push(`<span class="kind-badge">${U.EVENT_CATEGORIES[t.category].label}</span>`);
+  if (U.isOngoingEvent(t)) meta.push('<span class="now-badge">กำลังดำเนินอยู่</span>');
   const time = event ? U.timeRange(t) || (showDate ? '' : 'ทั้งวัน') : t.dueTime;
   if (t.dueDate && (showDate || time)) {
     const label = [showDate ? U.relativeDateLabel(t.dueDate) : '', time].filter(Boolean).join(' · ');
@@ -233,7 +236,7 @@ function taskItemHTML(t, { showDate = true } = {}) {
     ? `<span class="event-mark" aria-hidden="true">${icon('calendar')}</span>`
     : `<button class="check" type="button" data-action="toggle" aria-pressed="${t.done}"
         aria-label="${t.done ? 'ทำเครื่องหมายว่ายังไม่เสร็จ' : 'ทำเครื่องหมายว่าเสร็จแล้ว'}">${icon('check')}</button>`;
-  const cls = event ? `is-event${U.isPastEvent(t) ? ' is-past' : ''}` : `prio-${t.priority}${t.done ? ' is-done' : ''}`;
+  const cls = event ? `is-event cat-${t.category}${U.isPastEvent(t) ? ' is-past' : ''}` : `prio-${t.priority}${t.done ? ' is-done' : ''}`;
   return `
     <li class="task ${cls}" data-id="${esc(t.id)}">
       ${lead}
@@ -250,18 +253,37 @@ const allTags = () =>
   [...new Set(state.tasks.flatMap((t) => t.tags))].sort((a, b) => a.localeCompare(b, 'th'));
 
 // ---------- มุมมอง: ภาพรวม ----------
+// กล่องรายการบนแดชบอร์ด · more = { status, kind } สำหรับปุ่ม "ดูทั้งหมด" เมื่อเกิน limit
+function panelHTML(title, list, { empty, showDate = true, tone = '', limit = 0, more = {} } = {}) {
+  const shown = limit ? list.slice(0, limit) : list;
+  return `
+    <section class="panel${tone ? ` panel-${tone}` : ''}">
+      <header class="panel-head"><h2>${title}</h2><span class="count">${list.length}</span></header>
+      ${shown.length ? taskListHTML(shown, { showDate }) : `<p class="panel-empty">${empty}</p>`}
+      ${limit && list.length > limit ? `<button class="link-btn" type="button" data-action="goto-list" data-status="${more.status || 'pending'}" data-kind="${more.kind || 'all'}">ดูทั้งหมด ${list.length} รายการ</button>` : ''}
+    </section>`;
+}
+
 function dashboardView() {
   const now = new Date();
   const hour = now.getHours();
   const greeting = hour < 12 ? 'สวัสดีตอนเช้า' : hour < 17 ? 'สวัสดีตอนบ่าย' : 'สวัสดีตอนเย็น';
+  const mode = state.dashMode;
   const head = `
-    <div class="page-head">
-      <p class="eyebrow">${U.F.full.format(now)}</p>
-      <h1>${greeting}</h1>
+    <div class="page-head dash-head">
+      <div>
+        <p class="eyebrow">${U.F.full.format(now)}</p>
+        <h1>${greeting}</h1>
+      </div>
+      <div class="segmented" role="group" aria-label="ภาพรวมของ">
+        <button type="button" data-action="dash-mode" data-mode="task" aria-pressed="${mode === 'task'}">งาน</button>
+        <button type="button" data-action="dash-mode" data-mode="event" aria-pressed="${mode === 'event'}">กิจกรรม</button>
+      </div>
     </div>`;
 
   const items = state.tasks;
   if (!items.length) return head + emptyHTML('ยังไม่มีงาน', 'เริ่มจากเพิ่มงานหรือกิจกรรมแรกของคุณ แล้วจัดตารางได้ในหน้า "ตารางงาน"');
+  if (mode === 'event') return head + eventDashboardHTML();
 
   // สถิติ/ความคืบหน้านับเฉพาะงาน ส่วนรายการวันนี้/7 วันแสดงกิจกรรมด้วย
   const tasks = items.filter((t) => !U.isEvent(t));
@@ -281,15 +303,7 @@ function dashboardView() {
   const doneCount = tasks.length - pending.length;
   const pct = tasks.length ? Math.round((doneCount / tasks.length) * 100) : 0;
 
-  const panel = (title, list, { empty, showDate = true, tone = '', limit = 0 } = {}) => {
-    const shown = limit ? list.slice(0, limit) : list;
-    return `
-      <section class="panel${tone ? ` panel-${tone}` : ''}">
-        <header class="panel-head"><h2>${title}</h2><span class="count">${list.length}</span></header>
-        ${shown.length ? taskListHTML(shown, { showDate }) : `<p class="panel-empty">${empty}</p>`}
-        ${limit && list.length > limit ? `<button class="link-btn" type="button" data-action="goto-list" data-status="pending">ดูทั้งหมด ${list.length} รายการ</button>` : ''}
-      </section>`;
-  };
+  const panel = panelHTML;
 
   return `
     ${head}
@@ -299,17 +313,17 @@ function dashboardView() {
         <span class="stat-value">${todayTasks.length - todayDone}</span>
         <span class="stat-sub">เสร็จแล้ว ${todayDone} จาก ${todayTasks.length}${todayEvents ? ` · กิจกรรม ${todayEvents}` : ''}</span>
       </button>
-      <button class="stat${overdue.length ? ' stat-danger' : ''}" type="button" data-action="goto-list" data-status="overdue">
+      <button class="stat${overdue.length ? ' stat-danger' : ''}" type="button" data-action="goto-list" data-status="overdue" data-kind="task">
         <span class="stat-label">เลยกำหนด</span>
         <span class="stat-value">${overdue.length}</span>
         <span class="stat-sub">${overdue.length ? 'ควรจัดการก่อน' : 'ไม่มีงานค้างเกินกำหนด'}</span>
       </button>
-      <button class="stat" type="button" data-action="goto-list" data-status="pending">
+      <button class="stat" type="button" data-action="goto-list" data-status="pending" data-kind="task">
         <span class="stat-label">งานค้างทั้งหมด</span>
         <span class="stat-value">${pending.length}</span>
         <span class="stat-sub">7 วันข้างหน้า ${upcomingTasks} งาน</span>
       </button>
-      <button class="stat" type="button" data-action="goto-list" data-status="done">
+      <button class="stat" type="button" data-action="goto-list" data-status="done" data-kind="task">
         <span class="stat-label">ความคืบหน้า</span>
         <span class="stat-value">${pct}%</span>
         <span class="progress" role="progressbar" aria-valuenow="${pct}" aria-valuemin="0" aria-valuemax="100"><span style="width:${pct}%"></span></span>
@@ -320,13 +334,95 @@ function dashboardView() {
       ${overdue.length ? panel('เลยกำหนด', overdue, { tone: 'danger' }) : ''}
       ${panel('วันนี้', todayList, { empty: 'ไม่มีงานหรือกิจกรรมวันนี้', showDate: false })}
       ${panel('7 วันข้างหน้า', upcoming, { empty: 'ยังไม่มีงานหรือกิจกรรมในสัปดาห์นี้' })}
-      ${noDate.length ? panel('ไม่มีกำหนด', noDate, { limit: 5 }) : ''}
+      ${noDate.length ? panel('ไม่มีกำหนด', noDate, { limit: 5, more: { kind: 'task' } }) : ''}
+    </div>`;
+}
+
+// แดชบอร์ดกิจกรรม: กิจกรรมถัดไป ประชุมที่ต้องเข้า วันนี้ 7 วันข้างหน้า และสรุปตามประเภท
+function eventDashboardHTML() {
+  const events = state.tasks.filter(U.isEvent);
+  if (!events.length) {
+    return `
+      <div class="empty">
+        ${icon('calendar')}
+        <h2>ยังไม่มีกิจกรรม</h2>
+        <p>เพิ่มประชุม นัดหมาย หรือกิจกรรมอื่นๆ แล้วดูสรุปได้ที่นี่</p>
+        <button class="btn btn-primary" type="button" data-action="add-event-on" data-date="${U.todayISO()}">${icon('plus')}เพิ่มกิจกรรม</button>
+      </div>`;
+  }
+  const today = U.todayISO();
+  const in7 = U.toISODate(U.addDays(new Date(), 7));
+  const upcoming = events.filter((t) => !U.isPastEvent(t)).sort(U.compareByDue);
+  const todayList = events.filter((t) => t.dueDate === today).sort(U.compareByDue);
+  const todayLeft = todayList.filter((t) => !U.isPastEvent(t)).length;
+  const meetings = upcoming.filter((t) => t.category === 'meeting');
+  const meetings7 = meetings.filter((t) => t.dueDate <= in7);
+  const meetingsToday = meetings.filter((t) => t.dueDate === today).length;
+  const next7 = upcoming.filter((t) => t.dueDate <= in7);
+  const week = next7.filter((t) => t.dueDate > today);
+  // กิจกรรมถัดไป: วันนี้เลือกอันที่มีเวลาก่อน (กิจกรรมทั้งวันใช้เมื่อไม่มีอย่างอื่น)
+  const next = upcoming.find((t) => t.dueDate > today || t.dueTime) || upcoming[0];
+
+  const cats = Object.entries(U.EVENT_CATEGORIES).map(([k, c]) => [k, c.label, next7.filter((t) => t.category === k).length]);
+  const max = Math.max(1, ...cats.map(([, , n]) => n));
+
+  return `
+    <section class="stats">
+      <button class="stat" type="button" data-action="goto-calendar">
+        <span class="stat-label">กิจกรรมวันนี้</span>
+        <span class="stat-value">${todayLeft}</span>
+        <span class="stat-sub">${todayList.length ? `เหลืออีก ${todayLeft} จาก ${todayList.length}` : 'วันนี้ว่าง'}</span>
+      </button>
+      ${
+        next
+          ? `<button class="stat stat-event cat-${next.category}" type="button" data-action="edit" data-id="${esc(next.id)}">
+               <span class="stat-label">ถัดไป · ${U.EVENT_CATEGORIES[next.category].label}</span>
+               <span class="stat-text" title="${esc(next.title)}">${esc(next.title)}</span>
+               <span class="stat-sub">${esc(U.eventWhenLabel(next))}${next.location ? ` · ${esc(next.location)}` : ''}</span>
+             </button>`
+          : `<div class="stat"><span class="stat-label">ถัดไป</span><span class="stat-text">—</span><span class="stat-sub">ไม่มีกิจกรรมที่กำลังจะมาถึง</span></div>`
+      }
+      <button class="stat stat-event cat-meeting" type="button" data-action="goto-list" data-status="pending" data-kind="event:meeting">
+        <span class="stat-label">ประชุมที่ต้องเข้า</span>
+        <span class="stat-value">${meetings7.length}</span>
+        <span class="stat-sub">ใน 7 วัน · วันนี้ ${meetingsToday}</span>
+      </button>
+      <button class="stat" type="button" data-action="goto-list" data-status="pending" data-kind="event">
+        <span class="stat-label">กิจกรรมที่จะมาถึง</span>
+        <span class="stat-value">${upcoming.length}</span>
+        <span class="stat-sub">7 วันข้างหน้า ${next7.length} รายการ</span>
+      </button>
+    </section>
+    <div class="dash-grid">
+      ${panelHTML('ประชุมที่ต้องเข้า', meetings, { empty: 'ไม่มีประชุมที่กำลังจะมาถึง', limit: 6, more: { kind: 'event:meeting' } })}
+      ${panelHTML('วันนี้', todayList, { empty: 'ไม่มีกิจกรรมวันนี้', showDate: false })}
+      ${panelHTML('7 วันข้างหน้า', week, { empty: 'ยังไม่มีกิจกรรมในสัปดาห์นี้', limit: 8, more: { kind: 'event' } })}
+      <section class="panel">
+        <header class="panel-head"><h2>ตามประเภท · 7 วันข้างหน้า</h2><span class="count">${next7.length}</span></header>
+        <ul class="cat-rows">
+          ${cats
+            .map(
+              ([k, label, n]) => `
+            <li><button class="cat-row cat-${k}" type="button" data-action="goto-list" data-status="pending" data-kind="event:${k}">
+              <span class="cat-name">${label}</span>
+              <span class="cat-bar"><span style="width:${Math.round((n / max) * 100)}%"></span></span>
+              <span class="cat-count">${n}</span>
+            </button></li>`,
+            )
+            .join('')}
+        </ul>
+      </section>
     </div>`;
 }
 
 // ---------- มุมมอง: รายการงาน ----------
-const ofKind = (list) =>
-  state.filter.kind === 'all' ? list : list.filter((t) => (state.filter.kind === 'event') === U.isEvent(t));
+function ofKind(list) {
+  const kind = state.filter.kind;
+  if (kind === 'all') return list;
+  if (kind === 'task') return list.filter((t) => !U.isEvent(t));
+  const cat = kind.split(':')[1];
+  return list.filter((t) => U.isEvent(t) && (!cat || t.category === cat));
+}
 
 function filteredTasks() {
   const { status, tag, q, sort } = state.filter;
@@ -336,7 +432,7 @@ function filteredTasks() {
       (status === 'all' ||
         (status === 'done' ? U.isFinished(t) : status === 'overdue' ? U.isOverdue(t) : !U.isFinished(t))) &&
       (!tag || t.tags.includes(tag)) &&
-      (!needle || [t.title, t.description, t.location, ...t.tags].some((s) => s.toLowerCase().includes(needle))),
+      (!needle || [t.title, t.description, t.location, U.isEvent(t) ? U.EVENT_CATEGORIES[t.category].label : '', ...t.tags].some((s) => s.toLowerCase().includes(needle))),
   );
   const cmp =
     sort === 'priority' ? U.compareByPriority : sort === 'created' ? (a, b) => b.createdAt - a.createdAt : U.compareByDue;
@@ -505,7 +601,7 @@ function monthHTML(byDate) {
 
 const chipClass = (t) =>
   U.isEvent(t)
-    ? `is-event${U.isPastEvent(t) ? ' is-done' : ''}`
+    ? `is-event cat-${t.category}${U.isPastEvent(t) ? ' is-done' : ''}`
     : `prio-${t.priority}${t.done ? ' is-done' : ''}${U.isOverdue(t) ? ' is-overdue' : ''}`;
 
 function weekHTML(byDate) {
@@ -565,6 +661,7 @@ function openTaskDialog({ task = null, date = '', type = 'task' } = {}) {
   state.editingId = task?.id || null;
   const t = task || {
     type,
+    category: 'meeting',
     title: '',
     description: '',
     dueDate: date,
@@ -586,6 +683,7 @@ function openTaskDialog({ task = null, date = '', type = 'task' } = {}) {
   f.endTime.value = t.endTime || '';
   f.location.value = t.location || '';
   f.priority.value = t.priority;
+  f.category.value = t.category || 'meeting';
   f.tags.value = t.tags.join(', ');
   f.done.checked = t.done;
   $$('.field-error', form).forEach((el) => (el.hidden = true));
@@ -633,6 +731,7 @@ function submitTaskForm(e) {
   if (!f.endTime.reportValidity()) return;
   const data = {
     type: event ? 'event' : 'task',
+    category: event ? f.category.value || 'other' : '',
     title,
     description: f.description.value.trim(),
     // ใส่แค่เวลาโดยไม่ใส่วัน = วันนี้
@@ -774,10 +873,16 @@ const actions = {
   },
   'goto-list': (el) => {
     state.filter.status = el.dataset.status;
+    if (el.dataset.kind) state.filter.kind = el.dataset.kind;
     state.filter.q = '';
     state.filter.tag = '';
     saveFilter();
     setView('list');
+  },
+  'dash-mode': (el) => {
+    state.dashMode = el.dataset.mode;
+    savePrefs({ dashMode: state.dashMode });
+    render();
   },
   'goto-calendar': () => {
     state.cal.selected = U.todayISO();
