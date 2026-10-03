@@ -1,4 +1,4 @@
-# MyTodo
+# MildTask
 
 เว็บจัดการงาน ตารางงาน และ To-do list ส่วนตัว ใช้ HTML/CSS/JavaScript ล้วน ไม่มีขั้นตอน build โฮสต์บน GitHub Pages และเก็บข้อมูลใน Firebase Firestore (ฟรี)
 
@@ -30,14 +30,14 @@ firestore.rules    กฎความปลอดภัยของฐานข�
 ## ขั้นที่ 1: ลองรันในเครื่อง
 ไฟล์ JS เป็นแบบ ES module จึงต้องเปิดผ่านเว็บเซิร์ฟเวอร์ ดับเบิลคลิก `index.html` ตรง ๆ จะใช้ไม่ได้
 ```bash
-cd D:\MyTodoList
+cd D:\MildTask
 python -m http.server 8000
 ```
 จากนั้นเปิด http://localhost:8000
 
 ## ขั้นที่ 2: ตั้งค่า Firebase
 1. ไปที่ https://console.firebase.google.com แล้วกด **Create a project** (ไม่ต้องเปิด Google Analytics)
-2. **เพิ่ม Web app:** ในหน้า Project Overview กดไอคอน `</>` ตั้งชื่อ (เช่น `mytodo`) ไม่ต้องติ๊ก Hosting
+2. **เพิ่ม Web app:** ในหน้า Project Overview กดไอคอน `</>` ตั้งชื่อ (เช่น `MildTask`) ไม่ต้องติ๊ก Hosting
    - คัดลอกค่าใน `firebaseConfig` มาวางใน `js/config.js`
 3. **เปิด Authentication:** เมนู Build › Authentication › Get started › Sign-in method › **Google** › Enable › Save
 4. **เพิ่มโดเมนที่อนุญาต:** Authentication › Settings › **Authorized domains** › Add domain

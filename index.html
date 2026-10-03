@@ -3,14 +3,14 @@
 <head>
   <meta charset="utf-8" />
   <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover" />
-  <title>MyTodo</title>
+  <title>MildTask</title>
   <meta name="description" content="จัดการงาน ตารางงาน และ To-do list ส่วนตัว" />
   <meta name="theme-color" content="#4f46e5" />
   <link rel="icon" href="data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 32 32'%3E%3Crect width='32' height='32' rx='8' fill='%234f46e5'/%3E%3Cpath d='M9 16.5l4.5 4.5L23 11.5' fill='none' stroke='white' stroke-width='3' stroke-linecap='round' stroke-linejoin='round'/%3E%3C/svg%3E" />
   <link rel="preconnect" href="https://fonts.googleapis.com" />
   <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
   <link href="https://fonts.googleapis.com/css2?family=Noto+Sans+Thai:wght@400;500;600;700&display=swap" rel="stylesheet" />
-  <link rel="stylesheet" href="css/style.css" />
+  <link rel="stylesheet" href="css/style.css?v=3" />
   <script>
     // ตั้งธีมก่อนหน้าเว็บแสดง เพื่อไม่ให้กระพริบ
     try {
@@ -25,13 +25,17 @@
       <span class="brand-mark" aria-hidden="true">
         <svg viewBox="0 0 24 24"><path d="M6 12.5l4 4L18 8.5" /></svg>
       </span>
-      <span>MyTodo</span>
+      <span>MildTask</span>
     </div>
 
     <nav class="tabs" aria-label="มุมมอง">
       <button class="tab" data-view="dashboard" type="button">
         <svg viewBox="0 0 24 24" aria-hidden="true"><path d="M4 11l8-7 8 7v8a1 1 0 0 1-1 1h-4v-6H9v6H5a1 1 0 0 1-1-1z" /></svg>
         <span>ภาพรวม</span>
+      </button>
+      <button class="tab" data-view="events" type="button">
+        <svg viewBox="0 0 24 24" aria-hidden="true"><path d="M9 11a3 3 0 1 0 0-6 3 3 0 0 0 0 6zM3 20a6 6 0 0 1 12 0M16 5a3 3 0 0 1 0 6M21 20a6 6 0 0 0-4-5.6" /></svg>
+        <span>กิจกรรม</span>
       </button>
       <button class="tab" data-view="list" type="button">
         <svg viewBox="0 0 24 24" aria-hidden="true"><path d="M9 6h11M9 12h11M9 18h11M4 6h1M4 12h1M4 18h1" /></svg>
@@ -40,6 +44,10 @@
       <button class="tab" data-view="calendar" type="button">
         <svg viewBox="0 0 24 24" aria-hidden="true"><path d="M4 7a2 2 0 0 1 2-2h12a2 2 0 0 1 2 2v12a2 2 0 0 1-2 2H6a2 2 0 0 1-2-2zM4 10h16M8 3v4M16 3v4" /></svg>
         <span>ตารางงาน</span>
+      </button>
+      <button class="tab" data-view="fitness" type="button">
+        <svg viewBox="0 0 24 24" aria-hidden="true"><path d="M6 7v10M18 7v10M3 10v4M21 10v4M6 12h12" /></svg>
+        <span>ออกกำลังกาย</span>
       </button>
     </nav>
 
@@ -166,9 +174,72 @@
     </form>
   </dialog>
 
+  <dialog id="plan-dialog" aria-labelledby="plan-dialog-title">
+    <form id="plan-form" novalidate>
+      <header class="dialog-head">
+        <h2 id="plan-dialog-title">เพิ่มรายการ</h2>
+        <button class="icon-btn" type="button" data-action="close-plan" aria-label="ปิด">
+          <svg viewBox="0 0 24 24" aria-hidden="true"><path d="M6 6l12 12M18 6L6 18" /></svg>
+        </button>
+      </header>
+
+      <div class="segmented type-picker" role="radiogroup" aria-label="ประเภท">
+        <label><input type="radio" name="type" value="workout" /><span>สิ่งที่ต้องทำ</span></label>
+        <label><input type="radio" name="type" value="meal" /><span>สิ่งที่ต้องกิน</span></label>
+      </div>
+
+      <label class="field">
+        <span>ชื่อ</span>
+        <input name="title" type="text" maxlength="200" required autocomplete="off" />
+        <small class="field-error" hidden>กรุณาใส่ชื่อ</small>
+      </label>
+
+      <label class="field">
+        <span>รายละเอียด</span>
+        <textarea name="description" rows="2" maxlength="5000"></textarea>
+      </label>
+
+      <fieldset class="field meal-only">
+        <legend>มื้อ</legend>
+        <div class="segmented cat-picker">
+          <label><input type="radio" name="meal" value="breakfast" /><span>มื้อเช้า</span></label>
+          <label><input type="radio" name="meal" value="lunch" /><span>มื้อกลางวัน</span></label>
+          <label><input type="radio" name="meal" value="snack" /><span>มื้อว่าง</span></label>
+          <label><input type="radio" name="meal" value="dinner" /><span>มื้อเย็น</span></label>
+        </div>
+      </fieldset>
+
+      <fieldset class="field">
+        <legend>ทำซ้ำทุกสัปดาห์ในวัน</legend>
+        <div class="segmented cat-picker">
+          <label><input type="checkbox" name="days" value="1" /><span>จ.</span></label>
+          <label><input type="checkbox" name="days" value="2" /><span>อ.</span></label>
+          <label><input type="checkbox" name="days" value="3" /><span>พ.</span></label>
+          <label><input type="checkbox" name="days" value="4" /><span>พฤ.</span></label>
+          <label><input type="checkbox" name="days" value="5" /><span>ศ.</span></label>
+          <label><input type="checkbox" name="days" value="6" /><span>ส.</span></label>
+          <label><input type="checkbox" name="days" value="0" /><span>อา.</span></label>
+        </div>
+        <small class="field-hint">ไม่เลือกเลย = ทุกวัน</small>
+      </fieldset>
+
+      <label class="field">
+        <span>เวลา</span>
+        <input name="dueTime" type="time" />
+      </label>
+
+      <footer class="dialog-foot">
+        <button class="btn btn-danger-ghost edit-only" type="button" data-action="delete-plan">ลบ</button>
+        <span class="spacer"></span>
+        <button class="btn" type="button" data-action="close-plan">ยกเลิก</button>
+        <button class="btn btn-primary" type="submit">บันทึก</button>
+      </footer>
+    </form>
+  </dialog>
+
   <input type="file" id="import-file" accept="application/json,.json" hidden />
   <div id="toast" class="toast" role="status" aria-live="polite" hidden></div>
 
-  <script type="module" src="js/app.js"></script>
+  <script type="module" src="js/app.js?v=3"></script>
 </body>
 </html>

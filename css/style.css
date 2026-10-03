@@ -557,13 +557,6 @@ textarea:focus {
 }
 
 /* ---------- Dashboard ---------- */
-.dash-head {
-  display: flex;
-  align-items: flex-end;
-  justify-content: space-between;
-  flex-wrap: wrap;
-  gap: 12px;
-}
 .stat-text {
   font-size: 18px;
   font-weight: 600;
@@ -1257,6 +1250,61 @@ textarea:focus {
   border-color: var(--accent);
 }
 
+/* ---------- ออกกำลังกาย ---------- */
+.day-strip {
+  display: grid;
+  grid-template-columns: repeat(7, minmax(0, 1fr));
+  gap: 6px;
+  margin-bottom: 16px;
+}
+.day-pill {
+  display: grid;
+  justify-items: center;
+  padding: 8px 0 6px;
+  border: 1px solid var(--border);
+  border-radius: var(--radius-sm);
+  background: var(--surface);
+  color: var(--text);
+  box-shadow: var(--shadow);
+}
+.day-pill:hover {
+  border-color: var(--accent);
+}
+.day-pill.is-today .wn {
+  color: var(--accent);
+}
+.day-pill .wc {
+  margin: 0;
+  min-height: 18px;
+}
+.day-pill .wc.is-complete {
+  color: var(--success);
+  font-weight: 700;
+}
+.day-pill[aria-pressed='true'] {
+  background: var(--accent);
+  border-color: var(--accent);
+}
+.day-pill[aria-pressed='true'] > span,
+.day-pill.is-today[aria-pressed='true'] .wn {
+  color: var(--on-accent);
+}
+.task.plan-workout {
+  --prio: var(--accent);
+}
+.task.plan-meal {
+  --prio: var(--success);
+  --event: var(--success);
+}
+.plan-detail {
+  white-space: pre-line;
+  overflow-wrap: anywhere;
+}
+.field-hint {
+  color: var(--text-3);
+  font-size: 12px;
+}
+
 /* ---------- Dialog ---------- */
 dialog {
   width: min(520px, calc(100vw - 24px));
@@ -1280,7 +1328,8 @@ dialog[open] {
     transform: translateY(8px) scale(0.98);
   }
 }
-#task-form {
+#task-form,
+#plan-form {
   display: grid;
   gap: 14px;
   padding: 18px 20px 20px;
@@ -1376,7 +1425,9 @@ dialog[open] {
 }
 #task-form:not(.is-edit) .edit-only,
 #task-form[data-type='event'] .task-only,
-#task-form:not([data-type='event']) .event-only {
+#task-form:not([data-type='event']) .event-only,
+#plan-form:not(.is-edit) .edit-only,
+#plan-form:not([data-type='meal']) .meal-only {
   display: none;
 }
 .type-picker {
@@ -1597,7 +1648,8 @@ dialog[open] {
   dialog[open] {
     animation: sheet-up 0.22s ease-out;
   }
-  #task-form {
+  #task-form,
+  #plan-form {
     padding: 16px 16px calc(16px + env(safe-area-inset-bottom));
   }
   .dialog-foot .btn {

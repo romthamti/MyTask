@@ -69,20 +69,40 @@ export const EVENT_CATEGORIES = {
   other: { label: 'อื่นๆ' },
 };
 
+// ตารางออกกำลังกาย: workout = สิ่งที่ต้องทำ · meal = สิ่งที่ต้องกิน
+// ทำซ้ำทุกสัปดาห์ตามวันที่เลือก (days ว่าง = ทุกวัน) · doneDates = วันที่ติ๊กว่าทำแล้ว
+export const PLAN_TYPES = ['workout', 'meal'];
+export const MEALS = {
+  breakfast: { label: 'มื้อเช้า', rank: 0 },
+  lunch: { label: 'มื้อกลางวัน', rank: 1 },
+  snack: { label: 'มื้อว่าง', rank: 2 },
+  dinner: { label: 'มื้อเย็น', rank: 3 },
+};
+const ISO_DATE = /^\d{4}-\d{2}-\d{2}$/;
+
 // ทำให้ข้อมูลงานมีรูปแบบเดียวกันเสมอ (ใช้ทั้งตอนบันทึกและตอนนำเข้า)
 export function normalizeTask(t = {}) {
   const now = Date.now();
-  const event = t.type === 'event';
-  const done = !event && !!t.done;
+  const type = t.type === 'event' || PLAN_TYPES.includes(t.type) ? t.type : 'task';
+  const event = type === 'event';
+  const plan = PLAN_TYPES.includes(type);
+  const done = type === 'task' && !!t.done;
   return {
     // id ต้องใช้เป็นชื่อเอกสาร Firestore ได้ (ห้ามมี /)
     id: typeof t.id === 'string' && /^[\w-]{1,64}$/.test(t.id) ? t.id : uid(),
-    // task = งานที่ต้องทำ (ติ๊กเสร็จได้) · event = กิจกรรม/นัดหมาย (มีวันเวลา ไม่ต้องติ๊ก)
-    type: event ? 'event' : 'task',
-    category: event ? (EVENT_CATEGORIES[t.category] ? t.category : 'other') : '',
+    // task = งานที่ต้องทำ (ติ๊กเสร็จได้) · event = กิจกรรม/นัดหมาย (มีวันเวลา ไม่ต้องติ๊ก) · workout/meal = ตารางออกกำลังกาย
+    type,
+    category: event
+      ? (EVENT_CATEGORIES[t.category] ? t.category : 'other')
+      : type === 'meal' ? (MEALS[t.category] ? t.category : 'lunch') : '',
     title: String(t.title ?? '').trim().slice(0, 200),
     description: String(t.description ?? '').slice(0, 5000),
-    dueDate: /^\d{4}-\d{2}-\d{2}$/.test(t.dueDate) ? t.dueDate : null,
+    dueDate: !plan && ISO_DATE.test(t.dueDate) ? t.dueDate : null,
+    days: plan && Array.isArray(t.days)
+      ? [...new Set(t.days.map(Number))].filter((d) => Number.isInteger(d) && d >= 0 && d <= 6).sort()
+      : [],
+    // เก็บย้อนหลังพอสำหรับนับวันต่อเนื่อง (Firestore จำกัดขนาดเอกสาร)
+    doneDates: plan && Array.isArray(t.doneDates) ? [...new Set(t.doneDates.filter((d) => ISO_DATE.test(d)))].sort().slice(-400) : [],
     dueTime: /^\d{2}:\d{2}$/.test(t.dueTime) ? t.dueTime : '',
     endTime: /^\d{2}:\d{2}$/.test(t.endTime) ? t.endTime : '',
     location: String(t.location ?? '').trim().slice(0, 200),
@@ -98,6 +118,29 @@ export function normalizeTask(t = {}) {
 }
 
 export const isEvent = (t) => t.type === 'event';
+export const isPlan = (t) => PLAN_TYPES.includes(t.type);
+
+// รายการในตารางที่ต้องทำในวันนั้น
+export const onDay = (t, iso) => !t.days.length || t.days.includes(parseISODate(iso).getDay());
+export const isDoneOn = (t, iso) => t.doneDates.includes(iso);
+
+export function daysLabel(days) {
+  const key = days.join();
+  if (!days.length || days.length === 7) return 'ทุกวัน';
+  if (key === '1,2,3,4,5') return 'จ.–ศ.';
+  if (key === '0,6') return 'ส.–อา.';
+  return days.map((d) => WEEKDAYS[d]).join(' ');
+}
+
+// เรียงตามมื้อ → เวลา → สร้างก่อน
+export function comparePlan(a, b) {
+  return (
+    (a.type === 'meal' && b.type === 'meal' ? MEALS[a.category].rank - MEALS[b.category].rank : 0) ||
+    ((a.dueTime ? 0 : 1) - (b.dueTime ? 0 : 1)) ||
+    a.dueTime.localeCompare(b.dueTime) ||
+    (a.createdAt - b.createdAt)
+  );
+}
 
 // กิจกรรมที่ผ่านไปแล้ว (ดูจากเวลาสิ้นสุด ถ้าไม่มีใช้เวลาเริ่ม ถ้าไม่มีเวลาเลยถือว่าทั้งวัน)
 export function isPastEvent(t, today = todayISO(), now = nowHHMM()) {

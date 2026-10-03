@@ -1,5 +1,5 @@
-import { createStore } from './store.js';
-import * as U from './utils.js';
+import { createStore } from './store.js?v=3';
+import * as U from './utils.js?v=3';
 
 const $ = (sel, root = document) => root.querySelector(sel);
 const $$ = (sel, root = document) => [...root.querySelectorAll(sel)];
@@ -17,6 +17,7 @@ const ICONS = {
   search: '<path d="M11 18a7 7 0 1 0 0-14 7 7 0 0 0 0 14zM20 20l-4-4"/>',
   close: '<path d="M6 6l12 12M18 6L6 18"/>',
   inbox: '<path d="M4 13l2.5-7h11l2.5 7v5a1 1 0 0 1-1 1H5a1 1 0 0 1-1-1zM4 13h5l1 2h4l1-2h5"/>',
+  dumbbell: '<path d="M6 7v10M18 7v10M3 10v4M21 10v4M6 12h12"/>',
   pin: '<path d="M12 21s-7-6.2-7-11.5a7 7 0 0 1 14 0C19 14.8 12 21 12 21zM12 12a2.5 2.5 0 1 0 0-5 2.5 2.5 0 0 0 0 5z"/>',
 };
 const icon = (name) => `<svg viewBox="0 0 24 24" aria-hidden="true">${ICONS[name]}</svg>`;
@@ -37,7 +38,7 @@ function savePrefs(patch) {
   } catch {}
 }
 
-const VIEWS = ['dashboard', 'list', 'calendar'];
+const VIEWS = ['dashboard', 'events', 'list', 'calendar', 'fitness'];
 const STATUSES = [
   ['pending', 'ค้างอยู่'],
   ['overdue', 'เลยกำหนด'],
@@ -59,8 +60,10 @@ const savedFilter = prefs.filter || {};
 
 const state = {
   tasks: [],
+  // ตารางออกกำลังกาย (workout/meal) แยกจากงาน เพื่อไม่ให้ไปปนในรายการงาน/ปฏิทิน
+  plan: [],
+  fitDay: U.todayISO(),
   view: VIEWS.includes(prefs.view) ? prefs.view : 'dashboard',
-  dashMode: prefs.dashMode === 'event' ? 'event' : 'task',
   filter: {
     status: STATUSES.some(([v]) => v === savedFilter.status) ? savedFilter.status : 'pending',
     sort: SORTS.some(([v]) => v === savedFilter.sort) ? savedFilter.sort : 'due',
@@ -78,6 +81,9 @@ const saveFilter = () =>
 let store = null;
 const dialog = $('#task-dialog');
 const form = $('#task-form');
+const planDialog = $('#plan-dialog');
+const planForm = $('#plan-form');
+const anyDialogOpen = () => dialog.open || planDialog.open;
 
 // ---------- เริ่มต้น ----------
 async function init() {
@@ -102,16 +108,17 @@ async function init() {
     toast(errorMessage(err));
   };
   store.onAuth(() => render());
-  store.subscribe((tasks) => {
-    state.tasks = tasks;
+  store.subscribe((items) => {
+    state.tasks = items.filter((t) => !U.isPlan(t));
+    state.plan = items.filter(U.isPlan);
     render();
   });
   // อัปเดตสถานะ "เลยกำหนด" ตามเวลาที่ผ่านไป
   setInterval(() => {
-    if (!dialog.open && document.visibilityState === 'visible' && !isTyping()) render();
+    if (!anyDialogOpen() && document.visibilityState === 'visible' && !isTyping()) render();
   }, 60_000);
   document.addEventListener('visibilitychange', () => {
-    if (document.visibilityState === 'visible' && !dialog.open) render();
+    if (document.visibilityState === 'visible' && !anyDialogOpen()) render();
   });
 }
 
@@ -139,7 +146,7 @@ function render() {
   const focusId = el.contains(active) ? active.id : '';
   const caret = focusId && 'selectionStart' in active ? active.selectionStart : null;
 
-  el.innerHTML = { dashboard: dashboardView, list: listView, calendar: calendarView }[state.view]();
+  el.innerHTML = { dashboard: dashboardView, events: eventsView, list: listView, calendar: calendarView, fitness: fitnessView }[state.view]();
 
   if (focusId) {
     const f = document.getElementById(focusId);
@@ -194,7 +201,7 @@ function loginHTML() {
   return `
     <div class="login-card">
       <span class="brand-mark big" aria-hidden="true"><svg viewBox="0 0 24 24">${ICONS.check}</svg></span>
-      <h1>MyTodo</h1>
+      <h1>MildTask</h1>
       <p>จัดการงาน ตารางงาน และ To-do list ของคุณ<br />เข้าสู่ระบบเพื่อซิงก์ข้อมูลทุกอุปกรณ์</p>
       <button class="btn btn-google" type="button" data-action="sign-in">
         <svg viewBox="0 0 48 48" aria-hidden="true"><path fill="#FFC107" d="M43.6 20.5H42V20H24v8h11.3C33.7 32.7 29.2 36 24 36c-6.6 0-12-5.4-12-12s5.4-12 12-12c3.1 0 5.8 1.2 7.9 3.1l5.7-5.7C34 6.1 29.3 4 24 4 12.9 4 4 12.9 4 24s8.9 20 20 20 20-8.9 20-20c0-1.3-.1-2.4-.4-3.5z"/><path fill="#FF3D00" d="M6.3 14.7l6.6 4.8C14.7 15.1 19 12 24 12c3.1 0 5.8 1.2 7.9 3.1l5.7-5.7C34 6.1 29.3 4 24 4 16.3 4 9.7 8.3 6.3 14.7z"/><path fill="#4CAF50" d="M24 44c5.2 0 9.9-2 13.4-5.2l-6.2-5.2C29.2 35.1 26.7 36 24 36c-5.2 0-9.6-3.3-11.3-7.9l-6.5 5C9.5 39.6 16.2 44 24 44z"/><path fill="#1976D2" d="M43.6 20.5H42V20H24v8h11.3c-.8 2.2-2.2 4.2-4.1 5.6l6.2 5.2C37 39.2 44 34 44 24c0-1.3-.1-2.4-.4-3.5z"/></svg>
@@ -268,22 +275,14 @@ function dashboardView() {
   const now = new Date();
   const hour = now.getHours();
   const greeting = hour < 12 ? 'สวัสดีตอนเช้า' : hour < 17 ? 'สวัสดีตอนบ่าย' : 'สวัสดีตอนเย็น';
-  const mode = state.dashMode;
   const head = `
-    <div class="page-head dash-head">
-      <div>
-        <p class="eyebrow">${U.F.full.format(now)}</p>
-        <h1>${greeting}</h1>
-      </div>
-      <div class="segmented" role="group" aria-label="ภาพรวมของ">
-        <button type="button" data-action="dash-mode" data-mode="task" aria-pressed="${mode === 'task'}">งาน</button>
-        <button type="button" data-action="dash-mode" data-mode="event" aria-pressed="${mode === 'event'}">กิจกรรม</button>
-      </div>
+    <div class="page-head">
+      <p class="eyebrow">${U.F.full.format(now)}</p>
+      <h1>${greeting}</h1>
     </div>`;
 
   const items = state.tasks;
   if (!items.length) return head + emptyHTML('ยังไม่มีงาน', 'เริ่มจากเพิ่มงานหรือกิจกรรมแรกของคุณ แล้วจัดตารางได้ในหน้า "ตารางงาน"');
-  if (mode === 'event') return head + eventDashboardHTML();
 
   // สถิติ/ความคืบหน้านับเฉพาะงาน ส่วนรายการวันนี้/7 วันแสดงกิจกรรมด้วย
   const tasks = items.filter((t) => !U.isEvent(t));
@@ -336,6 +335,16 @@ function dashboardView() {
       ${panel('7 วันข้างหน้า', upcoming, { empty: 'ยังไม่มีงานหรือกิจกรรมในสัปดาห์นี้' })}
       ${noDate.length ? panel('ไม่มีกำหนด', noDate, { limit: 5, more: { kind: 'task' } }) : ''}
     </div>`;
+}
+
+// ---------- มุมมอง: กิจกรรม ----------
+function eventsView() {
+  return `
+    <div class="page-head">
+      <p class="eyebrow">${U.F.full.format(new Date())}</p>
+      <h1>กิจกรรม</h1>
+    </div>
+    ${eventDashboardHTML()}`;
 }
 
 // แดชบอร์ดกิจกรรม: กิจกรรมถัดไป ประชุมที่ต้องเข้า วันนี้ 7 วันข้างหน้า และสรุปตามประเภท
@@ -629,6 +638,139 @@ function weekHTML(byDate) {
   return `<div class="week">${cols}</div>`;
 }
 
+// ---------- มุมมอง: ออกกำลังกาย ----------
+const planOn = (iso, type) => state.plan.filter((t) => (!type || t.type === type) && U.onDay(t, iso)).sort(U.comparePlan);
+const doneCount = (list, iso) => list.filter((t) => U.isDoneOn(t, iso)).length;
+
+// จำนวนวันติดกันที่ออกกำลังกายครบตามตาราง (วันพักไม่ตัดสถิติ · วันนี้ยังไม่ครบก็ยังไม่ตัด)
+function workoutStreak() {
+  const workouts = state.plan.filter((t) => t.type === 'workout');
+  let streak = 0;
+  for (let i = 0; i < 400 && workouts.length; i++) {
+    const d = U.addDays(new Date(), -i);
+    const iso = U.toISODate(d);
+    const dayEnd = new Date(d.getFullYear(), d.getMonth(), d.getDate() + 1).getTime();
+    const due = workouts.filter((t) => t.createdAt < dayEnd && U.onDay(t, iso));
+    if (!due.length) continue;
+    if (due.every((t) => U.isDoneOn(t, iso))) streak++;
+    else if (i > 0) break;
+  }
+  return streak;
+}
+
+function planItemHTML(t, iso) {
+  const done = U.isDoneOn(t, iso);
+  const meta = [];
+  if (t.type === 'meal') meta.push(`<span class="kind-badge">${U.MEALS[t.category].label}</span>`);
+  if (t.dueTime) meta.push(`<span class="meta">${icon('clock')}${t.dueTime}</span>`);
+  meta.push(`<span class="meta">${icon('calendar')}${U.daysLabel(t.days)}</span>`);
+  if (t.description) meta.push(`<span class="meta plan-detail">${esc(t.description)}</span>`);
+  return `
+    <li class="task plan-${t.type}${done ? ' is-done' : ''}" data-id="${esc(t.id)}">
+      <button class="check" type="button" data-action="toggle" aria-pressed="${done}"
+        aria-label="${done ? 'ทำเครื่องหมายว่ายังไม่ได้ทำ' : 'ทำเครื่องหมายว่าทำแล้ว'}">${icon('check')}</button>
+      <button class="task-main" type="button" data-action="edit">
+        <span class="task-title">${esc(t.title)}</span>
+        <span class="task-meta">${meta.join('')}</span>
+      </button>
+      <button class="icon-btn task-del" type="button" data-action="delete" aria-label="ลบ">${icon('trash')}</button>
+    </li>`;
+}
+
+function planPanelHTML(title, type, list, iso, empty) {
+  return `
+    <section class="panel">
+      <header class="panel-head">
+        <h2>${title}</h2>
+        <span class="count">${doneCount(list, iso)}/${list.length}</span>
+        <button class="btn btn-sm" type="button" data-action="add-plan" data-type="${type}">${icon('plus')}เพิ่ม</button>
+      </header>
+      ${list.length ? `<ul class="task-list">${list.map((t) => planItemHTML(t, iso)).join('')}</ul>` : `<p class="panel-empty">${empty}</p>`}
+    </section>`;
+}
+
+function fitnessView() {
+  const day = state.fitDay;
+  const today = U.todayISO();
+  const start = U.startOfWeek(U.parseISODate(day));
+  const head = `
+    <div class="cal-head">
+      <div>
+        <p class="eyebrow">${U.F.dayMonth.format(start)} – ${U.F.dayMonthYear.format(U.addDays(start, 6))}</p>
+        <h1 class="cal-title">ออกกำลังกาย</h1>
+      </div>
+      <div class="cal-nav">
+        <button class="icon-btn" type="button" data-action="fit-shift" data-days="-7" aria-label="สัปดาห์ก่อน">${icon('left')}</button>
+        <button class="btn btn-sm" type="button" data-action="fit-day" data-date="${today}">วันนี้</button>
+        <button class="icon-btn" type="button" data-action="fit-shift" data-days="7" aria-label="สัปดาห์ถัดไป">${icon('right')}</button>
+      </div>
+    </div>`;
+
+  if (!state.plan.length) {
+    return `${head}
+      <div class="empty">
+        ${icon('dumbbell')}
+        <h2>ยังไม่มีตารางออกกำลังกาย</h2>
+        <p>เพิ่มสิ่งที่ต้องทำและสิ่งที่ต้องกินของแต่ละวัน แล้วติ๊กเมื่อทำแล้ว</p>
+        <div class="panel-actions">
+          <button class="btn btn-primary" type="button" data-action="add-plan" data-type="workout">${icon('plus')}สิ่งที่ต้องทำ</button>
+          <button class="btn" type="button" data-action="add-plan" data-type="meal">${icon('plus')}สิ่งที่ต้องกิน</button>
+        </div>
+      </div>`;
+  }
+
+  let weekTotal = 0;
+  let weekDone = 0;
+  const pills = [];
+  for (let i = 0; i < 7; i++) {
+    const d = U.addDays(start, i);
+    const iso = U.toISODate(d);
+    const list = planOn(iso);
+    const n = doneCount(list, iso);
+    weekTotal += list.length;
+    weekDone += n;
+    const complete = list.length && n === list.length;
+    pills.push(`
+      <button class="day-pill${iso === today ? ' is-today' : ''}" type="button" data-action="fit-day" data-date="${iso}"
+        aria-pressed="${iso === day}" aria-label="${U.F.full.format(d)} ทำแล้ว ${n} จาก ${list.length}">
+        <span class="wd">${U.WEEKDAYS[i]}</span>
+        <span class="wn">${d.getDate()}</span>
+        <span class="wc${complete ? ' is-complete' : ''}">${complete ? '✓' : list.length ? `${n}/${list.length}` : ''}</span>
+      </button>`);
+  }
+
+  const workouts = planOn(day, 'workout');
+  const meals = planOn(day, 'meal');
+  const dayLabel = day === today ? 'วันนี้' : U.F.weekdayLong.format(U.parseISODate(day));
+  const pct = (n, total) => (total ? Math.round((n / total) * 100) : 0);
+  const stat = (label, n, total, sub) => `
+    <div class="stat">
+      <span class="stat-label">${label}</span>
+      <span class="stat-value">${n}/${total}</span>
+      <span class="progress" role="progressbar" aria-valuenow="${pct(n, total)}" aria-valuemin="0" aria-valuemax="100"><span style="width:${pct(n, total)}%"></span></span>
+      <span class="stat-sub">${sub}</span>
+    </div>`;
+  const streak = workoutStreak();
+
+  return `
+    ${head}
+    <div class="day-strip">${pills.join('')}</div>
+    <section class="stats">
+      ${stat(`ออกกำลังกาย · ${dayLabel}`, doneCount(workouts, day), workouts.length, workouts.length ? 'รายการที่ทำแล้ว' : 'วันพัก')}
+      ${stat(`อาหาร · ${dayLabel}`, doneCount(meals, day), meals.length, 'มื้อที่กินแล้ว')}
+      ${stat('สัปดาห์นี้', weekDone, weekTotal, `ทำแล้ว ${pct(weekDone, weekTotal)}%`)}
+      <div class="stat">
+        <span class="stat-label">ทำครบต่อเนื่อง</span>
+        <span class="stat-value">${streak} วัน</span>
+        <span class="stat-sub">${streak ? 'ออกกำลังกายครบตามตาราง' : 'ติ๊กให้ครบเพื่อเริ่มนับ'}</span>
+      </div>
+    </section>
+    <div class="dash-grid">
+      ${planPanelHTML('สิ่งที่ต้องทำ', 'workout', workouts, day, 'ไม่มีตารางออกกำลังกายในวันนี้ (วันพัก)')}
+      ${planPanelHTML('สิ่งที่ต้องกิน', 'meal', meals, day, 'ยังไม่มีรายการอาหารของวันนี้')}
+    </div>`;
+}
+
 // ---------- การกระทำ ----------
 function setView(view) {
   state.view = view;
@@ -645,7 +787,14 @@ function shiftCal(n) {
 
 function toggleTask(id) {
   const t = store.get(id);
-  if (t && !U.isEvent(t)) store.update(id, { done: !t.done });
+  if (!t || U.isEvent(t)) return;
+  if (U.isPlan(t)) {
+    // รายการในตาราง: ติ๊กแยกเป็นรายวัน ตามวันที่กำลังดูอยู่
+    const iso = state.fitDay;
+    store.update(id, { doneDates: U.isDoneOn(t, iso) ? t.doneDates.filter((d) => d !== iso) : [...t.doneDates, iso] });
+  } else {
+    store.update(id, { done: !t.done });
+  }
 }
 
 function deleteTask(id) {
@@ -752,6 +901,70 @@ function submitTaskForm(e) {
   closeDialog();
 }
 
+// ---------- ฟอร์มตารางออกกำลังกาย ----------
+function openPlanDialog(item = null, type = 'workout') {
+  if (!store || (store.mode === 'firebase' && !store.user)) return;
+  toggleMenu(false);
+  state.editingId = item?.id || null;
+  const f = planForm.elements;
+  planForm.reset();
+  planForm.classList.toggle('is-edit', !!item);
+  f.type.value = item?.type || type;
+  f.title.value = item?.title || '';
+  f.description.value = item?.description || '';
+  f.dueTime.value = item?.dueTime || '';
+  const hour = new Date().getHours();
+  f.meal.value = item?.type === 'meal' ? item.category : hour < 10 ? 'breakfast' : hour < 14 ? 'lunch' : hour < 17 ? 'snack' : 'dinner';
+  const days = item?.days || [];
+  for (const box of f.days) box.checked = days.includes(Number(box.value));
+  $('.field-error', planForm).hidden = true;
+  syncPlanType();
+  planDialog.showModal();
+  if (!item) f.title.focus();
+}
+
+function syncPlanType() {
+  const f = planForm.elements;
+  const meal = f.type.value === 'meal';
+  planForm.dataset.type = meal ? 'meal' : 'workout';
+  $('#plan-dialog-title').textContent = `${state.editingId ? 'แก้ไข' : 'เพิ่ม'}${meal ? 'สิ่งที่ต้องกิน' : 'สิ่งที่ต้องทำ'}`;
+  f.title.placeholder = meal ? 'เช่น อกไก่ + ข้าวกล้อง, โปรตีนเชค' : 'เช่น วิ่ง 30 นาที, วิดพื้น, แพลงก์';
+  f.description.placeholder = meal ? 'ปริมาณ แคลอรี่ หรือโน้ต (ไม่ใส่ก็ได้)' : 'เช่น 3 เซ็ต × 12 ครั้ง (ไม่ใส่ก็ได้)';
+}
+
+function closePlanDialog() {
+  if (planDialog.open) planDialog.close();
+  state.editingId = null;
+}
+
+function submitPlanForm(e) {
+  e.preventDefault();
+  const f = planForm.elements;
+  const title = f.title.value.trim();
+  if (!title) {
+    $('.field-error', planForm).hidden = false;
+    f.title.focus();
+    return;
+  }
+  const type = f.type.value === 'meal' ? 'meal' : 'workout';
+  const data = {
+    type,
+    category: type === 'meal' ? f.meal.value : '',
+    title,
+    description: f.description.value.trim(),
+    dueTime: f.dueTime.value,
+    days: [...f.days].filter((b) => b.checked).map((b) => Number(b.value)),
+  };
+  if (state.editingId && store.get(state.editingId)) {
+    store.update(state.editingId, data);
+    toast('บันทึกการแก้ไขแล้ว');
+  } else {
+    store.add(data);
+    toast('เพิ่มลงตารางแล้ว');
+  }
+  closePlanDialog();
+}
+
 function quickAdd(e) {
   e.preventDefault();
   const input = $('#quick-add-input');
@@ -767,14 +980,15 @@ function quickAdd(e) {
 }
 
 function exportJSON() {
-  const data = { app: 'mytodo', version: 1, exportedAt: new Date().toISOString(), tasks: state.tasks };
+  // รวมตารางออกกำลังกายด้วย (store.tasks = ทุกรายการ)
+  const data = { app: 'mytodo', version: 1, exportedAt: new Date().toISOString(), tasks: store.tasks };
   const url = URL.createObjectURL(new Blob([JSON.stringify(data, null, 2)], { type: 'application/json' }));
-  const a = Object.assign(document.createElement('a'), { href: url, download: `mytodo-${U.todayISO()}.json` });
+  const a = Object.assign(document.createElement('a'), { href: url, download: `mildtask-${U.todayISO()}.json` });
   document.body.append(a);
   a.click();
   a.remove();
   setTimeout(() => URL.revokeObjectURL(url), 1000);
-  toast(`ส่งออก ${state.tasks.length} รายการแล้ว`);
+  toast(`ส่งออก ${store.tasks.length} รายการแล้ว`);
 }
 
 async function importJSON(file) {
@@ -786,7 +1000,7 @@ async function importJSON(file) {
     await store.importMany(valid);
     toast(`นำเข้า ${valid.length} รายการแล้ว`);
   } catch {
-    toast('ไฟล์ไม่ถูกต้อง — ต้องเป็นไฟล์ JSON ที่ส่งออกจาก MyTodo');
+    toast('ไฟล์ไม่ถูกต้อง — ต้องเป็นไฟล์ JSON ที่ส่งออกจาก MildTask');
   }
 }
 
@@ -851,12 +1065,12 @@ const isTyping = () => {
 
 // ---------- ผูกเหตุการณ์ ----------
 const actions = {
-  add: () => openTaskDialog(),
+  add: () => (state.view === 'fitness' ? openPlanDialog() : openTaskDialog()),
   'add-on': (el) => openTaskDialog({ date: el.dataset.date }),
   'add-event-on': (el) => openTaskDialog({ date: el.dataset.date, type: 'event' }),
   edit: (el, id) => {
     const t = store.get(id);
-    if (t) openTaskDialog({ task: t });
+    if (t) U.isPlan(t) ? openPlanDialog(t) : openTaskDialog({ task: t });
   },
   toggle: (el, id) => toggleTask(id),
   delete: (el, id) => deleteTask(id),
@@ -866,6 +1080,21 @@ const actions = {
     deleteTask(id);
   },
   'close-dialog': closeDialog,
+  'add-plan': (el) => openPlanDialog(null, el.dataset.type),
+  'close-plan': closePlanDialog,
+  'delete-plan': () => {
+    const id = state.editingId;
+    closePlanDialog();
+    deleteTask(id);
+  },
+  'fit-day': (el) => {
+    state.fitDay = el.dataset.date;
+    render();
+  },
+  'fit-shift': (el) => {
+    state.fitDay = U.toISODate(U.addDays(U.parseISODate(state.fitDay), Number(el.dataset.days)));
+    render();
+  },
   'set-status': (el) => {
     state.filter.status = el.dataset.status;
     saveFilter();
@@ -878,11 +1107,6 @@ const actions = {
     state.filter.tag = '';
     saveFilter();
     setView('list');
-  },
-  'dash-mode': (el) => {
-    state.dashMode = el.dataset.mode;
-    savePrefs({ dashMode: state.dashMode });
-    render();
   },
   'goto-calendar': () => {
     state.cal.selected = U.todayISO();
@@ -957,7 +1181,7 @@ function bindEvents() {
     }
     // กด N เพื่อเพิ่มงาน · E เพื่อเพิ่มกิจกรรม
     const key = e.key.toLowerCase();
-    if ((key === 'n' || key === 'e') && !e.ctrlKey && !e.metaKey && !e.altKey && !isTyping() && !dialog.open) {
+    if ((key === 'n' || key === 'e') && !e.ctrlKey && !e.metaKey && !e.altKey && !isTyping() && !anyDialogOpen()) {
       e.preventDefault();
       openTaskDialog({ type: key === 'e' ? 'event' : 'task' });
     }
@@ -982,6 +1206,20 @@ function bindEvents() {
     if (e.target === dialog) closeDialog();
   });
   dialog.addEventListener('close', () => {
+    state.editingId = null;
+  });
+
+  planForm.addEventListener('submit', submitPlanForm);
+  planForm.elements.title.addEventListener('input', () => {
+    $('.field-error', planForm).hidden = true;
+  });
+  planForm.addEventListener('change', (e) => {
+    if (e.target.name === 'type') syncPlanType();
+  });
+  planDialog.addEventListener('click', (e) => {
+    if (e.target === planDialog) closePlanDialog();
+  });
+  planDialog.addEventListener('close', () => {
     state.editingId = null;
   });
 
