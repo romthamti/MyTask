@@ -70,7 +70,7 @@ export const EVENT_CATEGORIES = {
 };
 
 // ตารางออกกำลังกาย: workout = สิ่งที่ต้องทำ · meal = สิ่งที่ต้องกิน
-// ทำซ้ำทุกสัปดาห์ตามวันที่เลือก (days ว่าง = ทุกวัน) · doneDates = วันที่ติ๊กว่าทำแล้ว
+// ทำซ้ำทุกสัปดาห์ตามวันที่เลือก (days ว่าง = ทุกวัน) · doneDates = วันที่ทำแล้ว/กินแล้ว · missedDates = วันที่ลืมกิน
 export const PLAN_TYPES = ['workout', 'meal'];
 export const MEALS = {
   breakfast: { label: 'มื้อเช้า', rank: 0 },
@@ -79,6 +79,9 @@ export const MEALS = {
   dinner: { label: 'มื้อเย็น', rank: 3 },
 };
 const ISO_DATE = /^\d{4}-\d{2}-\d{2}$/;
+
+// เก็บย้อนหลังพอสำหรับนับวันต่อเนื่อง (Firestore จำกัดขนาดเอกสาร)
+const isoDates = (a) => (Array.isArray(a) ? [...new Set(a.filter((d) => ISO_DATE.test(d)))].sort().slice(-400) : []);
 
 // ทำให้ข้อมูลงานมีรูปแบบเดียวกันเสมอ (ใช้ทั้งตอนบันทึกและตอนนำเข้า)
 export function normalizeTask(t = {}) {
@@ -101,8 +104,8 @@ export function normalizeTask(t = {}) {
     days: plan && Array.isArray(t.days)
       ? [...new Set(t.days.map(Number))].filter((d) => Number.isInteger(d) && d >= 0 && d <= 6).sort()
       : [],
-    // เก็บย้อนหลังพอสำหรับนับวันต่อเนื่อง (Firestore จำกัดขนาดเอกสาร)
-    doneDates: plan && Array.isArray(t.doneDates) ? [...new Set(t.doneDates.filter((d) => ISO_DATE.test(d)))].sort().slice(-400) : [],
+    doneDates: plan ? isoDates(t.doneDates) : [],
+    missedDates: type === 'meal' ? isoDates(t.missedDates).filter((d) => !t.doneDates?.includes(d)) : [],
     dueTime: /^\d{2}:\d{2}$/.test(t.dueTime) ? t.dueTime : '',
     endTime: /^\d{2}:\d{2}$/.test(t.endTime) ? t.endTime : '',
     location: String(t.location ?? '').trim().slice(0, 200),
@@ -123,6 +126,7 @@ export const isPlan = (t) => PLAN_TYPES.includes(t.type);
 // รายการในตารางที่ต้องทำในวันนั้น
 export const onDay = (t, iso) => !t.days.length || t.days.includes(parseISODate(iso).getDay());
 export const isDoneOn = (t, iso) => t.doneDates.includes(iso);
+export const isMissedOn = (t, iso) => t.missedDates.includes(iso);
 
 export function daysLabel(days) {
   const key = days.join();

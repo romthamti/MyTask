@@ -1296,6 +1296,42 @@ textarea:focus {
   --prio: var(--success);
   --event: var(--success);
 }
+.plan-marks {
+  display: flex;
+  flex: none;
+  gap: 6px;
+  margin-top: 6px;
+}
+.plan-mark {
+  --mark: var(--prio);
+  padding: 4px 10px;
+  border: 1.5px solid color-mix(in srgb, var(--mark) 45%, var(--border));
+  border-radius: 99px;
+  background: transparent;
+  color: var(--text-2);
+  font-size: 13px;
+  font-weight: 600;
+  white-space: nowrap;
+  transition: background 0.15s, color 0.15s, transform 0.1s;
+}
+.plan-mark.mark-missed {
+  --mark: var(--danger);
+}
+.plan-mark:hover {
+  color: var(--mark);
+  background: color-mix(in srgb, var(--mark) 10%, transparent);
+}
+.plan-mark:active {
+  transform: scale(0.94);
+}
+.plan-mark[aria-pressed='true'] {
+  border-color: var(--mark);
+  background: var(--mark);
+  color: var(--surface);
+}
+.task.is-missed .task-title {
+  color: var(--danger);
+}
 .plan-detail {
   white-space: pre-line;
   overflow-wrap: anywhere;

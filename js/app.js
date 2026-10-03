@@ -1,5 +1,5 @@
-import { createStore } from './store.js?v=3';
-import * as U from './utils.js?v=3';
+import { createStore } from './store.js?v=4';
+import * as U from './utils.js?v=4';
 
 const $ = (sel, root = document) => root.querySelector(sel);
 const $$ = (sel, root = document) => [...root.querySelectorAll(sel)];
@@ -660,19 +660,24 @@ function workoutStreak() {
 
 function planItemHTML(t, iso) {
   const done = U.isDoneOn(t, iso);
+  const missed = U.isMissedOn(t, iso);
+  const meal = t.type === 'meal';
   const meta = [];
-  if (t.type === 'meal') meta.push(`<span class="kind-badge">${U.MEALS[t.category].label}</span>`);
+  if (meal) meta.push(`<span class="kind-badge">${U.MEALS[t.category].label}</span>`);
   if (t.dueTime) meta.push(`<span class="meta">${icon('clock')}${t.dueTime}</span>`);
   meta.push(`<span class="meta">${icon('calendar')}${U.daysLabel(t.days)}</span>`);
   if (t.description) meta.push(`<span class="meta plan-detail">${esc(t.description)}</span>`);
+  const mark = (status, label, on) =>
+    `<button class="plan-mark mark-${status}" type="button" data-action="plan-mark" data-status="${status}" aria-pressed="${on}">${label}</button>`;
   return `
-    <li class="task plan-${t.type}${done ? ' is-done' : ''}" data-id="${esc(t.id)}">
-      <button class="check" type="button" data-action="toggle" aria-pressed="${done}"
-        aria-label="${done ? 'ทำเครื่องหมายว่ายังไม่ได้ทำ' : 'ทำเครื่องหมายว่าทำแล้ว'}">${icon('check')}</button>
+    <li class="task plan-${t.type}${done ? ' is-done' : ''}${missed ? ' is-missed' : ''}" data-id="${esc(t.id)}">
       <button class="task-main" type="button" data-action="edit">
         <span class="task-title">${esc(t.title)}</span>
         <span class="task-meta">${meta.join('')}</span>
       </button>
+      <div class="plan-marks">
+        ${meal ? mark('done', 'กินแล้ว', done) + mark('missed', 'ลืมกิน', missed) : mark('done', 'ทำเสร็จแล้ว', done)}
+      </div>
       <button class="icon-btn task-del" type="button" data-action="delete" aria-label="ลบ">${icon('trash')}</button>
     </li>`;
 }
@@ -711,7 +716,7 @@ function fitnessView() {
       <div class="empty">
         ${icon('dumbbell')}
         <h2>ยังไม่มีตารางออกกำลังกาย</h2>
-        <p>เพิ่มสิ่งที่ต้องทำและสิ่งที่ต้องกินของแต่ละวัน แล้วติ๊กเมื่อทำแล้ว</p>
+        <p>เพิ่มสิ่งที่ต้องทำและสิ่งที่ต้องกินของแต่ละวัน แล้วกด “ทำเสร็จแล้ว” หรือ “กินแล้ว / ลืมกิน”</p>
         <div class="panel-actions">
           <button class="btn btn-primary" type="button" data-action="add-plan" data-type="workout">${icon('plus')}สิ่งที่ต้องทำ</button>
           <button class="btn" type="button" data-action="add-plan" data-type="meal">${icon('plus')}สิ่งที่ต้องกิน</button>
@@ -751,13 +756,14 @@ function fitnessView() {
       <span class="stat-sub">${sub}</span>
     </div>`;
   const streak = workoutStreak();
+  const missedMeals = meals.filter((t) => U.isMissedOn(t, day)).length;
 
   return `
     ${head}
     <div class="day-strip">${pills.join('')}</div>
     <section class="stats">
       ${stat(`ออกกำลังกาย · ${dayLabel}`, doneCount(workouts, day), workouts.length, workouts.length ? 'รายการที่ทำแล้ว' : 'วันพัก')}
-      ${stat(`อาหาร · ${dayLabel}`, doneCount(meals, day), meals.length, 'มื้อที่กินแล้ว')}
+      ${stat(`อาหาร · ${dayLabel}`, doneCount(meals, day), meals.length, missedMeals ? `มื้อที่กินแล้ว · ลืมกิน ${missedMeals} มื้อ` : 'มื้อที่กินแล้ว')}
       ${stat('สัปดาห์นี้', weekDone, weekTotal, `ทำแล้ว ${pct(weekDone, weekTotal)}%`)}
       <div class="stat">
         <span class="stat-label">ทำครบต่อเนื่อง</span>
@@ -788,13 +794,22 @@ function shiftCal(n) {
 function toggleTask(id) {
   const t = store.get(id);
   if (!t || U.isEvent(t)) return;
-  if (U.isPlan(t)) {
-    // รายการในตาราง: ติ๊กแยกเป็นรายวัน ตามวันที่กำลังดูอยู่
-    const iso = state.fitDay;
-    store.update(id, { doneDates: U.isDoneOn(t, iso) ? t.doneDates.filter((d) => d !== iso) : [...t.doneDates, iso] });
-  } else {
-    store.update(id, { done: !t.done });
-  }
+  if (U.isPlan(t)) markPlan(id, 'done');
+  else store.update(id, { done: !t.done });
+}
+
+// รายการในตาราง: บันทึกแยกเป็นรายวัน ตามวันที่กำลังดูอยู่ · status = done (ทำแล้ว/กินแล้ว) | missed (ลืมกิน)
+// กดปุ่มเดิมซ้ำ = ยกเลิก · ทำแล้วกับลืมกินอยู่พร้อมกันไม่ได้
+function markPlan(id, status) {
+  const t = store.get(id);
+  if (!t || !U.isPlan(t)) return;
+  const iso = state.fitDay;
+  const without = (list) => list.filter((d) => d !== iso);
+  const on = status === 'missed' ? U.isMissedOn(t, iso) : U.isDoneOn(t, iso);
+  store.update(id, {
+    doneDates: status === 'done' && !on ? [...t.doneDates, iso] : without(t.doneDates),
+    missedDates: status === 'missed' && !on && t.type === 'meal' ? [...t.missedDates, iso] : without(t.missedDates),
+  });
 }
 
 function deleteTask(id) {
@@ -1073,6 +1088,7 @@ const actions = {
     if (t) U.isPlan(t) ? openPlanDialog(t) : openTaskDialog({ task: t });
   },
   toggle: (el, id) => toggleTask(id),
+  'plan-mark': (el, id) => markPlan(id, el.dataset.status),
   delete: (el, id) => deleteTask(id),
   'delete-from-dialog': () => {
     const id = state.editingId;
