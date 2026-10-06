@@ -1,3 +1,5 @@
+import { t, locale } from './i18n.js?v=5';
+
 // ---------- วันที่ ----------
 export const pad = (n) => String(n).padStart(2, '0');
 export const toISODate = (d) => `${d.getFullYear()}-${pad(d.getMonth() + 1)}-${pad(d.getDate())}`;
@@ -23,23 +25,36 @@ export const startOfWeek = (date) => {
 };
 export const diffDays = (a, b) => Math.round((parseISODate(a) - parseISODate(b)) / 86400000);
 
-const fmt = (opts) => new Intl.DateTimeFormat('th-TH', opts);
-export const F = {
-  dayMonth: fmt({ day: 'numeric', month: 'short' }),
-  dayMonthYear: fmt({ day: 'numeric', month: 'short', year: 'numeric' }),
-  full: fmt({ weekday: 'long', day: 'numeric', month: 'long', year: 'numeric' }),
-  monthYear: fmt({ month: 'long', year: 'numeric' }),
-  weekdayLong: fmt({ weekday: 'long' }),
+const FORMATS = {
+  dayMonth: { day: 'numeric', month: 'short' },
+  dayMonthYear: { day: 'numeric', month: 'short', year: 'numeric' },
+  full: { weekday: 'long', day: 'numeric', month: 'long', year: 'numeric' },
+  monthYear: { month: 'long', year: 'numeric' },
+  weekdayLong: { weekday: 'long' },
 };
+// สร้างตัวจัดรูปแบบตามภาษาที่เลือกอยู่ (เก็บไว้ใช้ซ้ำ)
+const formatters = new Map();
+export const F = Object.fromEntries(
+  Object.entries(FORMATS).map(([name, opts]) => [
+    name,
+    {
+      format(d) {
+        const key = `${locale()}|${name}`;
+        if (!formatters.has(key)) formatters.set(key, new Intl.DateTimeFormat(locale(), opts));
+        return formatters.get(key).format(d);
+      },
+    },
+  ]),
+);
 
-// ตัวย่อมาตรฐาน (Intl ของแต่ละเบราว์เซอร์ให้ความยาวไม่เท่ากัน)
-export const WEEKDAYS = ['อา.', 'จ.', 'อ.', 'พ.', 'พฤ.', 'ศ.', 'ส.'];
+// ตัวย่อมาตรฐาน (Intl ของแต่ละเบราว์เซอร์ให้ความยาวไม่เท่ากัน) · 0 = อาทิตย์
+export const weekdayShort = (d) => t('wd')[d];
 
 export function relativeDateLabel(iso) {
   const diff = diffDays(iso, todayISO());
-  if (diff === 0) return 'วันนี้';
-  if (diff === 1) return 'พรุ่งนี้';
-  if (diff === -1) return 'เมื่อวาน';
+  if (diff === 0) return t('today');
+  if (diff === 1) return t('tomorrow');
+  if (diff === -1) return t('yesterday');
   const d = parseISODate(iso);
   return (d.getFullYear() === new Date().getFullYear() ? F.dayMonth : F.dayMonthYear).format(d);
 }
@@ -54,30 +69,36 @@ export const uid = () =>
     : Date.now().toString(36) + Math.random().toString(36).slice(2, 12);
 
 // ---------- งาน ----------
-export const PRIORITIES = {
-  high: { label: 'สูง', rank: 0 },
-  medium: { label: 'กลาง', rank: 1 },
-  low: { label: 'ต่ำ', rank: 2 },
-};
+// label เป็น getter เพื่อให้ได้ข้อความตามภาษาที่เลือกอยู่
+const labelled = (prefix, entries) =>
+  Object.fromEntries(
+    Object.entries(entries).map(([k, v]) => [k, { ...v, get label() { return t(`${prefix}.${k}`); } }]),
+  );
+
+export const PRIORITIES = labelled('prio', {
+  high: { rank: 0 },
+  medium: { rank: 1 },
+  low: { rank: 2 },
+});
 
 // ประเภทของกิจกรรม (สีอยู่ใน css: --cat-<key>)
-export const EVENT_CATEGORIES = {
-  meeting: { label: 'ประชุม' },
-  appointment: { label: 'นัดหมาย' },
-  personal: { label: 'ส่วนตัว' },
-  travel: { label: 'เดินทาง' },
-  other: { label: 'อื่นๆ' },
-};
+export const EVENT_CATEGORIES = labelled('cat', {
+  meeting: {},
+  appointment: {},
+  personal: {},
+  travel: {},
+  other: {},
+});
 
 // ตารางออกกำลังกาย: workout = สิ่งที่ต้องทำ · meal = สิ่งที่ต้องกิน
 // ทำซ้ำทุกสัปดาห์ตามวันที่เลือก (days ว่าง = ทุกวัน) · doneDates = วันที่ทำแล้ว/กินแล้ว · missedDates = วันที่ลืมกิน
 export const PLAN_TYPES = ['workout', 'meal'];
-export const MEALS = {
-  breakfast: { label: 'มื้อเช้า', rank: 0 },
-  lunch: { label: 'มื้อกลางวัน', rank: 1 },
-  snack: { label: 'มื้อว่าง', rank: 2 },
-  dinner: { label: 'มื้อเย็น', rank: 3 },
-};
+export const MEALS = labelled('meal', {
+  breakfast: { rank: 0 },
+  lunch: { rank: 1 },
+  snack: { rank: 2 },
+  dinner: { rank: 3 },
+});
 const ISO_DATE = /^\d{4}-\d{2}-\d{2}$/;
 
 // เก็บย้อนหลังพอสำหรับนับวันต่อเนื่อง (Firestore จำกัดขนาดเอกสาร)
@@ -130,10 +151,10 @@ export const isMissedOn = (t, iso) => t.missedDates.includes(iso);
 
 export function daysLabel(days) {
   const key = days.join();
-  if (!days.length || days.length === 7) return 'ทุกวัน';
-  if (key === '1,2,3,4,5') return 'จ.–ศ.';
-  if (key === '0,6') return 'ส.–อา.';
-  return days.map((d) => WEEKDAYS[d]).join(' ');
+  if (!days.length || days.length === 7) return t('everyDay');
+  if (key === '1,2,3,4,5') return t('weekdays');
+  if (key === '0,6') return t('weekend');
+  return days.map(weekdayShort).join(' ');
 }
 
 // เรียงตามมื้อ → เวลา → สร้างก่อน
@@ -165,18 +186,19 @@ const toMinutes = (hhmm) => {
 };
 
 // ข้อความบอกว่ากิจกรรมจะเริ่มเมื่อไร เช่น "อีก 25 นาที", "พรุ่งนี้ · 09:00–10:00"
-export function eventWhenLabel(t) {
-  if (isOngoingEvent(t)) return `กำลังดำเนินอยู่ · ถึง ${t.endTime}`;
-  if (t.dueDate === todayISO()) {
-    if (!t.dueTime) return 'วันนี้ · ทั้งวัน';
-    const diff = toMinutes(t.dueTime) - toMinutes(nowHHMM());
+export function eventWhenLabel(ev) {
+  if (isOngoingEvent(ev)) return t('ongoingUntil', { end: ev.endTime });
+  if (ev.dueDate === todayISO()) {
+    if (!ev.dueTime) return t('todayAllDay');
+    const diff = toMinutes(ev.dueTime) - toMinutes(nowHHMM());
     if (diff > 0) {
       const h = Math.floor(diff / 60);
       const m = diff % 60;
-      return `อีก ${[h && `${h} ชม.`, m && `${m} นาที`].filter(Boolean).join(' ')} · ${timeRange(t)}`;
+      const d = [h && t('hours', { n: h }), m && t('minutes', { n: m })].filter(Boolean).join(' ');
+      return `${t('startsIn', { d })} · ${timeRange(ev)}`;
     }
   }
-  return [relativeDateLabel(t.dueDate), timeRange(t) || 'ทั้งวัน'].join(' · ');
+  return [relativeDateLabel(ev.dueDate), timeRange(ev) || t('allDay')].join(' · ');
 }
 
 // "จบแล้ว": งานที่ติ๊กเสร็จ หรือกิจกรรมที่ผ่านไปแล้ว

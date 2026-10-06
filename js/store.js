@@ -1,5 +1,5 @@
-import { firebaseConfig } from './config.js?v=4';
-import { normalizeTask } from './utils.js?v=4';
+import { firebaseConfig } from './config.js?v=5';
+import { normalizeTask } from './utils.js?v=5';
 
 const FIREBASE_SDK = 'https://www.gstatic.com/firebasejs/12.19.0';
 
