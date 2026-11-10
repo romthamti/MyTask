@@ -190,7 +190,9 @@ function findRef(lines) {
 }
 
 // เดาหมวดจากชื่อผู้รับ/ร้านค้า
+// [หมวด, คำที่พบ, ประเภท (ไม่ระบุ = รายจ่าย)]
 const CATEGORY_HINTS = [
+  ['invest', /กองทุน|\bfunds?\b|หุ้น|หลักทรัพย์|securities|บลจ|asset\s*management|bitkub|binance|ทองคำ|ฮั่วเซ่งเฮง/i, 'saving'],
   ['food', /ร้านอาหาร|อาหาร|กาแฟ|coffee|cafe|คาเฟ่|grab\s*food|lineman|ไลน์แมน|foodpanda|starbucks|kfc|mcdonald|แมคโดนัลด์|swensen|mk\s|ก๋วยเตี๋ยว|ข้าว/i],
   ['transport', /grab|bolt|bts|mrt|ปตท|ptt|bangchak|บางจาก|shell|เชลล์|ทางด่วน|easy\s*pass|น้ำมัน|รถไฟ|การบิน|airways|air\s?asia/i],
   ['bills', /การไฟฟ้า|ไฟฟ้า|ประปา|\bmea\b|\bpea\b|true|ทรู|\bais\b|dtac|3bb|internet|อินเทอร์เน็ต|ค่าไฟ|ค่าน้ำ|ประกัน|insurance/i],
@@ -199,7 +201,7 @@ const CATEGORY_HINTS = [
   ['fun', /netflix|spotify|youtube|steam|cinema|โรงภาพยนตร์|major|sf\s?cinema|คอนเสิร์ต|ticket/i],
 ];
 
-// คืนค่า { amount (สตางค์), date (YYYY-MM-DD หรือ ''), name, ref, kind: 'payment'|'transfer', category }
+// คืนค่า { amount (สตางค์), date (YYYY-MM-DD หรือ ''), name, ref, kind: 'payment'|'transfer', category, type }
 export function parseSlip(raw) {
   // OCR มักแยก "ำ" เป็น นิคหิต + สระอา
   const text = raw.replace(/ํา/g, 'ำ');
@@ -209,12 +211,14 @@ export function parseSlip(raw) {
     .filter(Boolean);
   const name = findRecipient(lines);
   const hay = name || text;
+  const hint = CATEGORY_HINTS.find(([, re]) => re.test(hay));
   return {
     amount: findAmount(lines),
     date: findDate(text),
     name,
     ref: findRef(lines),
     kind: /ชำระ|payment|bill\s*pay/i.test(text) ? 'payment' : 'transfer',
-    category: CATEGORY_HINTS.find(([, re]) => re.test(hay))?.[0] || '',
+    category: hint?.[0] || '',
+    type: hint?.[2] || 'expense',
   };
 }

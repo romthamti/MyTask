@@ -91,7 +91,8 @@ export const EVENT_CATEGORIES = labelled('cat', {
 });
 
 // รายรับรายจ่าย: amount เก็บเป็นสตางค์ (จำนวนเต็ม) เพื่อไม่ให้ทศนิยมเพี้ยนตอนรวมยอด
-export const MONEY_TYPES = ['expense', 'income'];
+// expense = รายจ่าย · income = รายรับ · saving = เงินออม (ไม่นับเป็นรายจ่าย แต่หักออกจากคงเหลือ)
+export const MONEY_TYPES = ['expense', 'income', 'saving'];
 export const EXPENSE_CATEGORIES = labelled('mcat', {
   food: {},
   transport: {},
@@ -107,8 +108,16 @@ export const INCOME_CATEGORIES = labelled('mcat', {
   sales: {},
   otherIncome: {},
 });
-export const moneyCategories = (type) => (type === 'income' ? INCOME_CATEGORIES : EXPENSE_CATEGORIES);
-const defaultMoneyCategory = (type) => (type === 'income' ? 'otherIncome' : 'other');
+export const SAVING_CATEGORIES = labelled('mcat', {
+  reserve: {},
+  emergency: {},
+  invest: {},
+});
+const CATEGORIES_BY_TYPE = { expense: EXPENSE_CATEGORIES, income: INCOME_CATEGORIES, saving: SAVING_CATEGORIES };
+export const moneyCategories = (type) => CATEGORIES_BY_TYPE[type] || EXPENSE_CATEGORIES;
+export const defaultMoneyCategory = (type) => ({ income: 'otherIncome', saving: 'reserve' })[type] || 'other';
+export const moneyCategoryLabel = (key) =>
+  (EXPENSE_CATEGORIES[key] || INCOME_CATEGORIES[key] || SAVING_CATEGORIES[key])?.label || '';
 
 // ข้อมูลตารางออกกำลังกายเดิม (เลิกใช้แล้ว): เก็บไว้ตามเดิมโดยไม่แตะ และไม่แสดงในแอป
 const LEGACY_TYPES = ['workout', 'meal'];

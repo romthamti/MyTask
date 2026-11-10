@@ -25,6 +25,7 @@ const ICONS = {
   up: '<path d="M12 19V5M6 11l6-6 6 6"/>',
   receipt: '<path d="M6 3h12v18l-3-2-3 2-3-2-3 2zM9 8h6M9 12h6M9 16h3"/>',
   down: '<path d="M12 5v14M6 13l6 6 6-6"/>',
+  save: '<path d="M12 3v10M8 9l4 4 4-4M5 15v4h14v-4"/>',
   pin: '<path d="M12 21s-7-6.2-7-11.5a7 7 0 0 1 14 0C19 14.8 12 21 12 21zM12 12a2.5 2.5 0 1 0 0-5 2.5 2.5 0 0 0 0 5z"/>',
 };
 const icon = (name) => `<svg viewBox="0 0 24 24" aria-hidden="true">${ICONS[name]}</svg>`;
@@ -354,7 +355,8 @@ function dashMoneyHTML() {
   const expenses = month.filter((m) => m.type === 'expense');
   const income = sumOf(month.filter((m) => m.type === 'income'));
   const expense = sumOf(expenses);
-  const balance = income - expense;
+  const saved = sumType(month, 'saving');
+  const balance = income - expense - saved;
   const todaySpent = sumOf(expenses.filter((m) => m.dueDate === today));
 
   // เทียบรายจ่ายกับเดือนก่อน ในช่วงวันที่เดียวกัน (วันที่ 1 ถึงวันนี้)
@@ -380,6 +382,7 @@ function dashMoneyHTML() {
       <div class="mini-stats">
         <div><span>${t('type.income')}</span><b class="money-in">${U.formatMoney(income)}</b></div>
         <div><span>${t('type.expense')}</span><b>${U.formatMoney(expense)}</b></div>
+        <div><span>${t('type.saving')}</span><b class="money-save">${U.formatMoney(saved)}</b></div>
         <div><span>${t('money.balance')}</span><b class="${balance < 0 ? 'is-neg' : ''}">${balance < 0 ? '−' : ''}${U.formatMoney(Math.abs(balance))}</b></div>
       </div>
       <p class="dash-money-sub"><span>${t('dash.todaySpent', { amount: U.formatMoney(todaySpent) })}</span>${compare}</p>
@@ -594,7 +597,12 @@ function moneyByDate() {
 function moneyTotalsHTML(list) {
   const inc = sumOf(list.filter((m) => m.type === 'income'));
   const exp = sumOf(list.filter((m) => m.type === 'expense'));
-  return [inc && `<span class="money-in">+${U.formatMoney(inc)}</span>`, exp && `<span class="money-out">−${U.formatMoney(exp)}</span>`]
+  const sav = sumType(list, 'saving');
+  return [
+    inc && `<span class="money-in">+${U.formatMoney(inc)}</span>`,
+    exp && `<span class="money-out">−${U.formatMoney(exp)}</span>`,
+    sav && `<span class="money-save">${t('cal.saved')} ${U.formatMoney(sav)}</span>`,
+  ]
     .filter(Boolean)
     .join('');
 }
@@ -735,7 +743,11 @@ function weekHTML(byDate, money) {
 // ---------- มุมมอง: รายรับรายจ่าย ----------
 const monthKey = () => U.toISODate(state.moneyMonth).slice(0, 7);
 const sumOf = (list) => list.reduce((n, m) => n + m.amount, 0);
+const sumType = (list, type) => sumOf(list.filter((m) => m.type === type));
+// ยอดสุทธิ: รายรับ − รายจ่าย − เงินออม
+const netOf = (list) => sumType(list, 'income') - sumType(list, 'expense') - sumType(list, 'saving');
 const signed = (m) => `${m.type === 'income' ? '+' : '−'}${U.formatMoney(m.amount)}`;
+const TYPE_ICON = { income: 'down', expense: 'up', saving: 'save' };
 
 function moneyItemHTML(m, { showDate = false } = {}) {
   const cat = U.moneyCategories(m.type)[m.category];
@@ -745,7 +757,7 @@ function moneyItemHTML(m, { showDate = false } = {}) {
   for (const tag of m.tags) meta.push(`<span class="tag">#${esc(tag)}</span>`);
   return `
     <li class="task money-item is-${m.type} mcat-${m.category}" data-id="${esc(m.id)}">
-      <span class="event-mark" aria-hidden="true">${icon(m.type === 'income' ? 'down' : 'up')}</span>
+      <span class="event-mark" aria-hidden="true">${icon(TYPE_ICON[m.type])}</span>
       <button class="task-main" type="button" data-action="edit">
         <span class="task-title">${esc(m.title)}</span>
         <span class="task-meta">${meta.join('')}</span>
@@ -773,6 +785,28 @@ function moneyCatRowsHTML(type, list, { limit = 0, action = 'money-cat' } = {}) 
       </button></li>`,
     )
     .join('')}</ul>`;
+}
+
+// เงินออม: เดือนนี้ฝากเข้าก้อนไหนเท่าไร + ยอดสะสมของแต่ละก้อน
+function savingPanelHTML(month, all) {
+  const rows = Object.entries(U.SAVING_CATEGORIES)
+    .map(([k, c]) => [k, c.label, sumOf(month.filter((m) => m.category === k)), sumOf(all.filter((m) => m.category === k))])
+    .filter(([, , , total]) => total > 0);
+  return `
+    <section class="panel">
+      <header class="panel-head"><h2>${t('money.bySaving')}</h2><span class="count">${U.formatMoney(sumOf(all))}</span></header>
+      <ul class="saving-rows">${rows
+        .map(
+          ([k, label, n, total]) => `
+        <li><button class="saving-row mcat-${k}" type="button" data-action="money-cat" data-cat="${k}" aria-pressed="${state.moneyCat === k}">
+          <span class="cat-name">${label}</span>
+          <span class="saving-month">${n ? `+${U.formatMoney(n)}` : '—'}</span>
+          <span class="saving-total">${U.formatMoney(total)}</span>
+        </button></li>`,
+        )
+        .join('')}</ul>
+      <p class="saving-legend"><span>${t('money.savingMonth')}</span><span>${t('money.savingTotal')}</span></p>
+    </section>`;
 }
 
 function moneyView() {
@@ -809,6 +843,7 @@ function moneyView() {
         <div class="panel-actions">
           <button class="btn btn-primary" type="button" data-action="add-money" data-type="expense">${icon('plus')}${t('type.expense')}</button>
           <button class="btn" type="button" data-action="add-money" data-type="income">${icon('plus')}${t('type.income')}</button>
+          <button class="btn" type="button" data-action="add-money" data-type="saving">${icon('plus')}${t('type.saving')}</button>
           <button class="btn" type="button" data-action="slip-pick">${icon('receipt')}${t('slip.read')}</button>
         </div>
       </div>`;
@@ -817,9 +852,14 @@ function moneyView() {
   const items = state.money.filter((m) => m.dueDate.startsWith(monthKey()));
   const incomes = items.filter((m) => m.type === 'income');
   const expenses = items.filter((m) => m.type === 'expense');
+  const savings = items.filter((m) => m.type === 'saving');
   const income = sumOf(incomes);
   const expense = sumOf(expenses);
-  const balance = income - expense;
+  const saved = sumOf(savings);
+  const balance = income - expense - saved;
+  // ยอดเงินออมสะสมทั้งหมด (ทุกเดือน จนถึงสิ้นเดือนที่ดู)
+  const monthEnd = U.toISODate(new Date(month.getFullYear(), month.getMonth() + 1, 0));
+  const savedAll = state.money.filter((m) => m.type === 'saving' && m.dueDate <= monthEnd);
   // เฉลี่ยต่อวัน: เดือนนี้นับถึงวันนี้ · เดือนอื่นนับทั้งเดือน
   const days = isThisMonth ? now.getDate() : new Date(month.getFullYear(), month.getMonth() + 1, 0).getDate();
 
@@ -834,7 +874,7 @@ function moneyView() {
       if (current !== null) list += '</ul></section>';
       current = m.dueDate;
       const day = shown.filter((x) => x.dueDate === current);
-      const net = sumOf(day.filter((x) => x.type === 'income')) - sumOf(day.filter((x) => x.type === 'expense'));
+      const net = netOf(day);
       const sign = net < 0 ? '−' : net > 0 ? '+' : '';
       list += `
         <section class="money-day">
@@ -847,7 +887,7 @@ function moneyView() {
     list += moneyItemHTML(m);
   }
   if (current !== null) list += '</ul></section>';
-  const catLabel = cat && (U.EXPENSE_CATEGORIES[cat] || U.INCOME_CATEGORIES[cat])?.label;
+  const catLabel = cat && U.moneyCategoryLabel(cat);
 
   return `${head}
     <section class="stats">
@@ -859,17 +899,17 @@ function moneyView() {
       <button class="stat stat-expense" type="button" data-action="add-money" data-type="expense">
         <span class="stat-label">${t('type.expense')}</span>
         <span class="stat-value">${U.formatMoney(expense)}</span>
-        <span class="stat-sub">${t('items', { n: expenses.length })}</span>
+        <span class="stat-sub">${t('money.expenseSub', { n: expenses.length, avg: U.formatMoney(Math.round(expense / days)) })}</span>
+      </button>
+      <button class="stat stat-saving" type="button" data-action="add-money" data-type="saving">
+        <span class="stat-label">${t('type.saving')}</span>
+        <span class="stat-value">${U.formatMoney(saved)}</span>
+        <span class="stat-sub">${t('money.savingSub', { total: U.formatMoney(sumOf(savedAll)) })}</span>
       </button>
       <div class="stat${balance < 0 ? ' stat-danger' : ''}">
         <span class="stat-label">${t('money.balance')}</span>
         <span class="stat-value">${balance < 0 ? '−' : ''}${U.formatMoney(Math.abs(balance))}</span>
         <span class="stat-sub">${t('money.balanceSub')}</span>
-      </div>
-      <div class="stat">
-        <span class="stat-label">${t('money.avg')}</span>
-        <span class="stat-value">${U.formatMoney(Math.round(expense / days))}</span>
-        <span class="stat-sub">${t('money.avgSub', { n: days })}</span>
       </div>
     </section>
     <div class="money-grid">
@@ -878,6 +918,7 @@ function moneyView() {
           <header class="panel-head"><h2>${t('money.byExpense')}</h2></header>
           ${expenses.length ? moneyCatRowsHTML('expense', expenses) : `<p class="panel-empty">${t('money.noExpense')}</p>`}
         </section>
+        ${savedAll.length ? savingPanelHTML(savings, savedAll) : ''}
         ${incomes.length ? `<section class="panel"><header class="panel-head"><h2>${t('money.byIncome')}</h2></header>${moneyCatRowsHTML('income', incomes)}</section>` : ''}
       </div>
       <section class="panel money-list">
@@ -1052,12 +1093,13 @@ function syncMoneyType(keep = '') {
   const prev = moneyForm.dataset.type;
   const checked = moneyForm.querySelector('[name="category"]:checked')?.value;
   if (prev && checked) pickedCat[prev] = checked;
-  const type = f.type.value === 'income' ? 'income' : 'expense';
+  const type = U.MONEY_TYPES.includes(f.type.value) ? f.type.value : 'expense';
   const cats = U.moneyCategories(type);
   const current = keep || pickedCat[type];
   const selected = cats[current] ? current : Object.keys(cats)[0];
   moneyForm.dataset.type = type;
-  $('#money-dialog-title').textContent = t(`dlg.${state.editingId ? 'edit' : 'add'}${type === 'income' ? 'Income' : 'Expense'}`);
+  const name = { expense: 'Expense', income: 'Income', saving: 'Saving' }[type];
+  $('#money-dialog-title').textContent = t(`dlg.${state.editingId ? 'edit' : 'add'}${name}`);
   f.title.placeholder = t(`ph.${type}`);
   $('#money-cats').innerHTML = Object.entries(cats)
     .map(([k, c]) => `<label class="mcat-${k}"><input type="radio" name="category" value="${k}"${k === selected ? ' checked' : ''} /><span>${c.label}</span></label>`)
@@ -1117,8 +1159,9 @@ async function readSlipFile(file) {
   if (r.amount && !f.amount.value) f.amount.value = amountText(r.amount);
   if (r.date) f.dueDate.value = r.date;
   if (!f.title.value) f.title.value = r.name || t(`slip.${r.kind}`);
-  // เดาหมวดไม่ได้ = อื่นๆ
-  if (f.type.value === 'expense') syncMoneyType(r.category || 'other');
+  // เดาหมวดได้ = ใช้ประเภทของหมวดนั้น (เช่น กองทุน → เงินออม) · เดาไม่ได้ = หมวดเริ่มต้น
+  if (r.category) f.type.value = r.type;
+  syncMoneyType(r.category || U.defaultMoneyCategory(f.type.value));
   f.ref.value = r.ref;
   slipStatus(t(r.amount ? 'slip.done' : 'slip.noAmount'), { tone: r.amount ? 'ok' : 'warn' });
 
@@ -1208,7 +1251,7 @@ function fillSlipRow(row, i, r) {
   $('.slip-amount', row).value = amountText(res.amount);
   $('.slip-date', row).value = res.date || U.todayISO();
   $('.slip-title', row).value = res.name || (r ? t(`slip.${res.kind}`) : '');
-  $('.slip-cat', row).value = `expense:${res.category || 'other'}`;
+  $('.slip-cat', row).value = res.category ? `${res.type}:${res.category}` : 'expense:other';
 
   // ซ้ำกับที่บันทึกไว้แล้ว หรือซ้ำกับรูปก่อนหน้าในชุดนี้ = ไม่ติ๊กให้
   const ref = batch[i].ref;
@@ -1297,7 +1340,7 @@ function submitMoneyForm(e) {
     f.amount.focus();
     return;
   }
-  const type = f.type.value === 'income' ? 'income' : 'expense';
+  const type = U.MONEY_TYPES.includes(f.type.value) ? f.type.value : 'expense';
   const category = moneyForm.querySelector('[name="category"]:checked')?.value || '';
   const data = {
     type,
@@ -1346,8 +1389,8 @@ function quickMoney(e) {
     .replace(/#[^\s#]+/g, '')
     .replace(/\s+/g, ' ')
     .trim();
-  // ไม่ระบุหมวด = อื่นๆ (หมวดสุดท้าย)
-  const cat = category || Object.keys(cats).at(-1);
+  // ไม่ระบุหมวด = หมวดเริ่มต้นของประเภทนั้น
+  const cat = category || U.defaultMoneyCategory(type);
   store.add({ type, category: cat, amount, title: title || cats[cat].label, tags, dueDate: U.todayISO() });
   input.value = '';
   // ให้เห็นรายการที่เพิ่งเพิ่ม
