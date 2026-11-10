@@ -1192,6 +1192,122 @@ textarea:focus {
 .dot.is-done {
   opacity: 0.35;
 }
+.dot.dot-money {
+  background: var(--m-bonus);
+  border-radius: 1px;
+  transform: rotate(45deg) scale(0.85);
+}
+
+/* สรุปการเงินในภาพรวม */
+.dash-money .panel-head h2 {
+  display: inline-flex;
+  align-items: center;
+  gap: 8px;
+}
+.dash-money .panel-head h2 svg {
+  width: 18px;
+  height: 18px;
+  color: var(--text-2);
+}
+.dash-money .link-btn {
+  padding: 0 4px;
+}
+.mini-stats {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(112px, 1fr));
+  gap: 8px;
+  padding: 4px 4px 0;
+}
+.mini-stats > div {
+  display: grid;
+  gap: 2px;
+  min-width: 0;
+}
+.mini-stats span {
+  font-size: 13px;
+  color: var(--text-2);
+}
+.mini-stats b {
+  font-size: 19px;
+  font-variant-numeric: tabular-nums;
+  white-space: nowrap;
+}
+.mini-stats b.is-neg {
+  color: var(--danger);
+}
+.dash-money-sub {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 2px 12px;
+  margin: 6px 4px 8px;
+  font-size: 13px;
+  color: var(--text-2);
+}
+.dash-money-sub .is-up {
+  color: var(--danger);
+}
+.dash-money-sub .is-down {
+  color: var(--income);
+}
+.dash-money .group-title {
+  margin-top: 6px;
+  padding: 6px 4px 0;
+  border-top: 1px solid var(--border);
+}
+
+/* รายรับรายจ่ายในปฏิทิน */
+.cal-money {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 0 6px;
+  padding: 0 4px;
+  font-size: 11px;
+  font-weight: 600;
+  font-variant-numeric: tabular-nums;
+}
+.money-in {
+  color: var(--income);
+}
+.money-out {
+  color: var(--text-2);
+}
+.cal-money-block {
+  margin-top: 6px;
+}
+.cal-money-block .group-title {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  flex-wrap: wrap;
+  gap: 4px 8px;
+  padding: 6px 4px 2px;
+  border-top: 1px solid var(--border);
+}
+.cal-money-block .group-title > span:first-child {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+}
+.cal-money-block .group-title svg {
+  width: 16px;
+  height: 16px;
+}
+.money-totals {
+  display: inline-flex;
+  gap: 8px;
+  font-variant-numeric: tabular-nums;
+}
+.week .money-item {
+  flex-wrap: wrap;
+}
+.week .money-item .task-main {
+  flex: 1 1 0;
+}
+.week .money-item .money-amount {
+  flex-basis: 100%;
+  text-align: right;
+  padding: 0 6px 4px;
+}
 
 .week {
   display: grid;
@@ -1424,6 +1540,86 @@ textarea:focus {
 }
 .slip-note {
   color: var(--text-3);
+}
+
+/* หน้าตรวจสลิปหลายรูป */
+#slips-dialog {
+  width: min(880px, calc(100vw - 24px));
+}
+.slips-wrap {
+  display: grid;
+  gap: 10px;
+  padding: 18px 20px 20px;
+}
+.slips-note {
+  margin: 0;
+  color: var(--text-3);
+  font-size: 13px;
+}
+.slips-list {
+  list-style: none;
+  margin: 0;
+  padding: 0;
+  display: grid;
+  gap: 8px;
+}
+.slip-row {
+  display: flex;
+  gap: 12px;
+  padding: 10px;
+  border: 1px solid var(--border);
+  border-radius: var(--radius-sm);
+  background: var(--surface-2);
+}
+.slip-row:has(.slip-use:checked) {
+  border-color: color-mix(in srgb, var(--accent) 45%, var(--border));
+}
+.slip-thumb {
+  flex: none;
+  width: 56px;
+  height: 96px;
+  object-fit: cover;
+  object-position: top;
+  border-radius: 8px;
+  background: var(--surface);
+}
+.slip-fields {
+  flex: 1;
+  min-width: 0;
+  display: grid;
+  gap: 6px;
+  align-content: start;
+  font-size: 13px;
+}
+.slip-fields p {
+  margin: 0;
+}
+.slip-row-head {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 8px;
+}
+.slip-row-head .check-field {
+  font-size: 14px;
+}
+.slip-grid {
+  display: grid;
+  grid-template-columns: 120px 150px minmax(0, 1fr) 150px;
+  gap: 6px;
+}
+.slip-grid input,
+.slip-grid select {
+  min-width: 0;
+  height: 36px;
+}
+.slip-amount {
+  font-weight: 600;
+  font-variant-numeric: tabular-nums;
+}
+.slips-sum {
+  font-weight: 600;
+  font-variant-numeric: tabular-nums;
 }
 
 /* ---------- Dialog ---------- */
@@ -1709,6 +1905,24 @@ dialog[open] {
   .money-quick .btn-primary {
     flex: 1;
   }
+  .slips-wrap {
+    padding: 16px 16px calc(16px + env(safe-area-inset-bottom));
+  }
+  .slip-grid {
+    grid-template-columns: minmax(0, 1fr) 144px;
+  }
+  .slip-row {
+    gap: 8px;
+    padding: 8px;
+  }
+  .slip-thumb {
+    width: 40px;
+    height: 72px;
+  }
+  .slip-grid input,
+  .slip-grid select {
+    padding: 0 8px;
+  }
   .quick-add {
     flex-wrap: wrap;
     padding: 6px;
@@ -1753,8 +1967,15 @@ dialog[open] {
   .cal-num {
     align-self: center;
   }
-  .cal-chips {
+  .cal-chips,
+  .cal-money {
     display: none;
+  }
+  .day-panel .panel-head {
+    flex-wrap: wrap;
+  }
+  .day-panel .panel-head h2 {
+    flex-basis: 100%;
   }
   .cal-dots {
     display: flex;

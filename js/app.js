@@ -86,7 +86,8 @@ const dialog = $('#task-dialog');
 const form = $('#task-form');
 const moneyDialog = $('#money-dialog');
 const moneyForm = $('#money-form');
-const anyDialogOpen = () => dialog.open || moneyDialog.open;
+const slipsDialog = $('#slips-dialog');
+const anyDialogOpen = () => dialog.open || moneyDialog.open || slipsDialog.open;
 
 // ---------- เริ่มต้น ----------
 async function init() {
@@ -287,7 +288,8 @@ function dashboardView() {
     </div>`;
 
   const items = state.tasks;
-  if (!items.length) return head + emptyHTML(t('empty.noTasks'), t('empty.dash'));
+  const money = dashMoneyHTML();
+  if (!items.length) return head + emptyHTML(t('empty.noTasks'), t('empty.dash')) + (money ? `<div class="dash-grid">${money}</div>` : '');
 
   // สถิติ/ความคืบหน้านับเฉพาะงาน ส่วนรายการวันนี้/7 วันแสดงกิจกรรมด้วย
   const tasks = items.filter((t) => !U.isEvent(t));
@@ -337,9 +339,57 @@ function dashboardView() {
     <div class="dash-grid">
       ${overdue.length ? panel(t('status.overdue'), overdue, { tone: 'danger' }) : ''}
       ${panel(t('today'), todayList, { empty: t('empty.today'), showDate: false })}
+      ${money}
       ${panel(t('next7'), upcoming, { empty: t('empty.week') })}
       ${noDate.length ? panel(t('noDate'), noDate, { limit: 5, more: { kind: 'task' } }) : ''}
     </div>`;
+}
+
+// กล่องสรุปการเงินเดือนนี้ในหน้าภาพรวม
+function dashMoneyHTML() {
+  if (!state.money.length) return '';
+  const now = new Date();
+  const today = U.todayISO();
+  const month = state.money.filter((m) => m.dueDate.startsWith(today.slice(0, 7)));
+  const expenses = month.filter((m) => m.type === 'expense');
+  const income = sumOf(month.filter((m) => m.type === 'income'));
+  const expense = sumOf(expenses);
+  const balance = income - expense;
+  const todaySpent = sumOf(expenses.filter((m) => m.dueDate === today));
+
+  // เทียบรายจ่ายกับเดือนก่อน ในช่วงวันที่เดียวกัน (วันที่ 1 ถึงวันนี้)
+  const prevKey = U.toISODate(new Date(now.getFullYear(), now.getMonth() - 1, 1)).slice(0, 7);
+  const prevSpent = sumOf(
+    state.money.filter((m) => m.type === 'expense' && m.dueDate.startsWith(prevKey) && Number(m.dueDate.slice(8)) <= now.getDate()),
+  );
+  let compare = '';
+  if (prevSpent) {
+    const pct = Math.round(((expense - prevSpent) / prevSpent) * 100);
+    compare = pct
+      ? `<span class="${pct > 0 ? 'is-up' : 'is-down'}">${t(pct > 0 ? 'dash.moreThanPrev' : 'dash.lessThanPrev', { pct: Math.abs(pct) })}</span>`
+      : `<span>${t('dash.sameAsPrev')}</span>`;
+  }
+
+  const recent = [...month].sort((a, b) => b.dueDate.localeCompare(a.dueDate) || b.createdAt - a.createdAt).slice(0, 4);
+  return `
+    <section class="panel dash-money">
+      <header class="panel-head">
+        <h2>${icon('wallet')}${t('dash.money', { month: U.F.monthYear.format(now) })}</h2>
+        <button class="link-btn" type="button" data-action="goto-money" data-cat="">${t('dash.moneyAll')}</button>
+      </header>
+      <div class="mini-stats">
+        <div><span>${t('type.income')}</span><b class="money-in">${U.formatMoney(income)}</b></div>
+        <div><span>${t('type.expense')}</span><b>${U.formatMoney(expense)}</b></div>
+        <div><span>${t('money.balance')}</span><b class="${balance < 0 ? 'is-neg' : ''}">${balance < 0 ? '−' : ''}${U.formatMoney(Math.abs(balance))}</b></div>
+      </div>
+      <p class="dash-money-sub"><span>${t('dash.todaySpent', { amount: U.formatMoney(todaySpent) })}</span>${compare}</p>
+      ${expenses.length ? moneyCatRowsHTML('expense', expenses, { limit: 4, action: 'goto-money' }) : ''}
+      ${
+        recent.length
+          ? `<h3 class="group-title">${t('dash.recent')}</h3><ul class="task-list">${recent.map((m) => moneyItemHTML(m, { showDate: true })).join('')}</ul>`
+          : `<p class="panel-empty">${t('money.emptyMonth')}</p>`
+      }
+    </section>`;
 }
 
 // ---------- มุมมอง: กิจกรรม ----------
@@ -529,9 +579,39 @@ function tasksByDate() {
   return map;
 }
 
+// รายรับรายจ่ายตามวัน (แสดงในปฏิทินด้วย)
+function moneyByDate() {
+  const map = new Map();
+  for (const m of state.money) {
+    if (!map.has(m.dueDate)) map.set(m.dueDate, []);
+    map.get(m.dueDate).push(m);
+  }
+  for (const list of map.values()) list.sort((a, b) => a.createdAt - b.createdAt);
+  return map;
+}
+
+// "+฿30,000 −฿845" (แสดงเฉพาะฝั่งที่มี)
+function moneyTotalsHTML(list) {
+  const inc = sumOf(list.filter((m) => m.type === 'income'));
+  const exp = sumOf(list.filter((m) => m.type === 'expense'));
+  return [inc && `<span class="money-in">+${U.formatMoney(inc)}</span>`, exp && `<span class="money-out">−${U.formatMoney(exp)}</span>`]
+    .filter(Boolean)
+    .join('');
+}
+
+function dayMoneyHTML(list) {
+  if (!list.length) return '';
+  return `
+    <div class="cal-money-block">
+      <h3 class="group-title"><span>${icon('wallet')}${t('money.title')}</span><span class="money-totals">${moneyTotalsHTML(list)}</span></h3>
+      <ul class="task-list">${list.map((m) => moneyItemHTML(m)).join('')}</ul>
+    </div>`;
+}
+
 function calendarView() {
   const { mode, cursor } = state.cal;
   const byDate = tasksByDate();
+  const money = moneyByDate();
   let title;
   if (mode === 'month') {
     title = U.F.monthYear.format(cursor);
@@ -554,10 +634,10 @@ function calendarView() {
         </div>
       </div>
     </div>
-    ${mode === 'month' ? monthHTML(byDate) : weekHTML(byDate)}`;
+    ${mode === 'month' ? monthHTML(byDate, money) : weekHTML(byDate, money)}`;
 }
 
-function monthHTML(byDate) {
+function monthHTML(byDate, money) {
   const { cursor, selected } = state.cal;
   const today = U.todayISO();
   const first = new Date(cursor.getFullYear(), cursor.getMonth(), 1);
@@ -570,6 +650,7 @@ function monthHTML(byDate) {
     const d = U.addDays(start, i);
     const iso = U.toISODate(d);
     const list = byDate.get(iso) || [];
+    const cash = money.get(iso) || [];
     const cls = [
       'cal-cell',
       d.getMonth() !== cursor.getMonth() && 'is-outside',
@@ -588,14 +669,16 @@ function monthHTML(byDate) {
       .join('');
     cells += `
       <div class="${cls}" role="button" tabindex="0" data-action="select-day" data-date="${iso}"
-        aria-label="${U.F.full.format(d)}${list.length ? t('hasItems', { n: list.length }) : ''}">
+        aria-label="${U.F.full.format(d)}${list.length + cash.length ? t('hasItems', { n: list.length + cash.length }) : ''}">
         <span class="cal-num">${d.getDate()}</span>
         <div class="cal-chips">${chips}${list.length > 3 ? `<span class="more">${t('moreItems', { n: list.length - 3 })}</span>` : ''}</div>
-        <div class="cal-dots">${dots}</div>
+        ${cash.length ? `<div class="cal-money">${moneyTotalsHTML(cash)}</div>` : ''}
+        <div class="cal-dots">${dots}${cash.length ? '<i class="dot dot-money"></i>' : ''}</div>
       </div>`;
   }
 
   const selList = byDate.get(selected) || [];
+  const selMoney = money.get(selected) || [];
   return `
     <div class="month">
       <div class="cal-weekdays">${t('wd').map((w) => `<span>${w}</span>`).join('')}</div>
@@ -607,9 +690,11 @@ function monthHTML(byDate) {
         <div class="panel-actions">
           <button class="btn btn-sm" type="button" data-action="add-on" data-date="${selected}">${icon('plus')}${t('task')}</button>
           <button class="btn btn-sm" type="button" data-action="add-event-on" data-date="${selected}">${icon('plus')}${t('event')}</button>
+          <button class="btn btn-sm" type="button" data-action="add-money" data-type="expense" data-date="${selected}">${icon('plus')}${t('cal.money')}</button>
         </div>
       </header>
-      ${selList.length ? taskListHTML(selList, { showDate: false }) : `<p class="panel-empty">${t('empty.day')}</p>`}
+      ${selList.length ? taskListHTML(selList, { showDate: false }) : selMoney.length ? '' : `<p class="panel-empty">${t('empty.day')}</p>`}
+      ${dayMoneyHTML(selMoney)}
     </section>`;
 }
 
@@ -618,7 +703,7 @@ const chipClass = (t) =>
     ? `is-event cat-${t.category}${U.isPastEvent(t) ? ' is-done' : ''}`
     : `prio-${t.priority}${t.done ? ' is-done' : ''}${U.isOverdue(t) ? ' is-overdue' : ''}`;
 
-function weekHTML(byDate) {
+function weekHTML(byDate, money) {
   const start = U.startOfWeek(state.cal.cursor);
   const today = U.todayISO();
   let cols = '';
@@ -626,17 +711,21 @@ function weekHTML(byDate) {
     const d = U.addDays(start, i);
     const iso = U.toISODate(d);
     const list = byDate.get(iso) || [];
+    const cash = money.get(iso) || [];
+    const n = list.length + cash.length;
     cols += `
       <section class="week-col${iso === today ? ' is-today' : ''}">
         <header class="week-head">
           <span class="wd">${U.weekdayShort(i)}</span>
           <span class="wn">${d.getDate()}</span>
-          <span class="wc">${list.length ? t('items', { n: list.length }) : ''}</span>
+          <span class="wc">${n ? t('items', { n }) : ''}</span>
         </header>
         ${list.length ? taskListHTML(list, { showDate: false }) : ''}
+        ${dayMoneyHTML(cash)}
         <div class="add-slots">
           <button class="add-slot" type="button" data-action="add-on" data-date="${iso}" aria-label="${t('addTask')}">${icon('plus')}${t('task')}</button>
           <button class="add-slot" type="button" data-action="add-event-on" data-date="${iso}" aria-label="${t('addEvent')}">${icon('plus')}${t('event')}</button>
+          <button class="add-slot" type="button" data-action="add-money" data-type="expense" data-date="${iso}" aria-label="${t('cal.moneyAdd')}">${icon('plus')}${t('cal.money')}</button>
         </div>
       </section>`;
   }
@@ -648,9 +737,10 @@ const monthKey = () => U.toISODate(state.moneyMonth).slice(0, 7);
 const sumOf = (list) => list.reduce((n, m) => n + m.amount, 0);
 const signed = (m) => `${m.type === 'income' ? '+' : '−'}${U.formatMoney(m.amount)}`;
 
-function moneyItemHTML(m) {
+function moneyItemHTML(m, { showDate = false } = {}) {
   const cat = U.moneyCategories(m.type)[m.category];
   const meta = [`<span class="kind-badge">${cat.label}</span>`];
+  if (showDate) meta.push(`<span class="meta">${icon('calendar')}${U.relativeDateLabel(m.dueDate)}</span>`);
   if (m.description) meta.push(`<span class="meta" title="${tr('hasNotes')}">${icon('note')}</span>`);
   for (const tag of m.tags) meta.push(`<span class="tag">#${esc(tag)}</span>`);
   return `
@@ -666,16 +756,17 @@ function moneyItemHTML(m) {
 }
 
 // แถบสัดส่วนตามหมวด · กดเพื่อกรองรายการ (กดซ้ำ = ยกเลิก)
-function moneyCatRowsHTML(type, list) {
-  const rows = Object.entries(U.moneyCategories(type))
+function moneyCatRowsHTML(type, list, { limit = 0, action = 'money-cat' } = {}) {
+  const all = Object.entries(U.moneyCategories(type))
     .map(([k, c]) => [k, c.label, sumOf(list.filter((m) => m.category === k))])
     .filter(([, , n]) => n > 0)
     .sort((a, b) => b[2] - a[2]);
+  const rows = limit ? all.slice(0, limit) : all;
   const max = Math.max(1, ...rows.map(([, , n]) => n));
   return `<ul class="cat-rows money-rows">${rows
     .map(
       ([k, label, n]) => `
-      <li><button class="cat-row mcat-${k}" type="button" data-action="money-cat" data-cat="${k}" aria-pressed="${state.moneyCat === k}">
+      <li><button class="cat-row mcat-${k}" type="button" data-action="${action}" data-cat="${k}" aria-pressed="${action === 'money-cat' && state.moneyCat === k}">
         <span class="cat-name">${label}</span>
         <span class="cat-bar"><span style="width:${Math.round((n / max) * 100)}%"></span></span>
         <span class="cat-count">${U.formatMoney(n)}</span>
@@ -929,7 +1020,7 @@ const moneyTags = () => [...new Set(state.money.flatMap((m) => m.tags))].sort((a
 // แสดงจำนวนเงินในช่องกรอก (สตางค์ → "125.5")
 const amountText = (satang) => (satang ? String(satang / 100) : '');
 
-function openMoneyDialog(item = null, type = state.quickMoneyType) {
+function openMoneyDialog(item = null, type = state.quickMoneyType, date = '') {
   if (!store || (store.mode === 'firebase' && !store.user)) return;
   toggleMenu(false);
   state.editingId = item?.id || null;
@@ -944,7 +1035,7 @@ function openMoneyDialog(item = null, type = state.quickMoneyType) {
   f.ref.value = item?.ref || '';
   hideSlip();
   // เพิ่มใหม่: ถ้ากำลังดูเดือนอื่น ใช้วันแรกของเดือนนั้น
-  f.dueDate.value = item?.dueDate || (U.todayISO().startsWith(monthKey()) ? U.todayISO() : U.toISODate(state.moneyMonth));
+  f.dueDate.value = item?.dueDate || date || (U.todayISO().startsWith(monthKey()) ? U.todayISO() : U.toISODate(state.moneyMonth));
   delete moneyForm.dataset.type;
   for (const k in pickedCat) delete pickedCat[k];
   syncMoneyType(item?.category || state.moneyCat);
@@ -1038,6 +1129,163 @@ async function readSlipFile(file) {
     el.hidden = false;
   }
   if (!r.amount) f.amount.focus();
+}
+
+// ---------- อ่านสลิปหลายรูป ----------
+// อ่านทีละรูปตามคิว แล้วให้ตรวจ/แก้ทุกรายการในหน้าเดียวก่อนบันทึกพร้อมกัน
+const MAX_SLIPS = 30;
+let batch = [];
+let batchToken = 0;
+
+// เลือกมา 1 รูป = หน้าต่างแบบเดิม · หลายรูป = หน้าตรวจรวม
+function readSlipFiles(files) {
+  const list = [...(files || [])].filter((f) => f?.type?.startsWith('image/'));
+  if (!list.length) {
+    if (files?.length) toast(t('slip.notImage'));
+    return;
+  }
+  if (list.length === 1) return readSlipFile(list[0]);
+  if (list.length > MAX_SLIPS) toast(t('slip.tooMany', { n: MAX_SLIPS }));
+  readSlipBatch(list.slice(0, MAX_SLIPS));
+}
+
+const catOptions = (selected) =>
+  U.MONEY_TYPES.map(
+    (type) => `<optgroup label="${t(`type.${type}`)}">${Object.entries(U.moneyCategories(type))
+      .map(([k, c]) => `<option value="${type}:${k}"${selected === `${type}:${k}` ? ' selected' : ''}>${c.label}</option>`)
+      .join('')}</optgroup>`,
+  ).join('');
+
+function slipRowHTML(r, i) {
+  return `
+    <li class="slip-row is-busy" data-i="${i}">
+      <img class="slip-thumb" src="${r.url}" alt="" />
+      <div class="slip-fields">
+        <div class="slip-row-head">
+          <label class="check-field"><input class="slip-use" type="checkbox" disabled /><span>${t('slip.use')} #${i + 1}</span></label>
+          <span class="slip-status is-busy"><span class="spinner"></span><span class="slip-msg">${t('slip.waiting')}</span></span>
+        </div>
+        <div class="slip-grid">
+          <input class="slip-amount" type="text" inputmode="decimal" autocomplete="off" placeholder="0.00" aria-label="${t('f.amount')}" disabled />
+          <input class="slip-date" type="date" aria-label="${t('f.date')}" disabled />
+          <input class="slip-title" type="text" maxlength="200" autocomplete="off" aria-label="${t('f.item')}" placeholder="${t('f.item')}" disabled />
+          <select class="slip-cat" aria-label="${t('f.moneyCategory')}" disabled>${catOptions('expense:other')}</select>
+        </div>
+        <p class="slip-dup" hidden></p>
+      </div>
+    </li>`;
+}
+
+const batchRows = () => $$('.slip-row', slipsDialog);
+
+function updateBatch() {
+  const rows = batchRows();
+  const done = rows.filter((r) => !r.classList.contains('is-busy')).length;
+  $('#slips-title').textContent = done < rows.length ? t('slip.batchReading', { done, n: rows.length }) : t('slip.batchTitle', { n: rows.length });
+  const picked = rows.filter((r) => $('.slip-use', r).checked);
+  let total = 0;
+  for (const r of picked) {
+    const [type] = $('.slip-cat', r).value.split(':');
+    total += (type === 'income' ? 1 : -1) * U.toSatang($('.slip-amount', r).value);
+  }
+  $('.slips-sum', slipsDialog).textContent = picked.length ? t('slip.batchSum', { amount: `${total < 0 ? '−' : '+'}${U.formatMoney(Math.abs(total))}` }) : '';
+  const btn = $('#slips-save');
+  btn.textContent = t('slip.batchSave', { n: picked.length });
+  btn.disabled = !picked.length;
+}
+
+function setRowStatus(row, msg, { busy = false, tone = '' } = {}) {
+  const el = $('.slip-status', row);
+  el.className = `slip-status${busy ? ' is-busy' : ''}${tone ? ` is-${tone}` : ''}`;
+  $('.slip-msg', row).textContent = msg;
+}
+
+function fillSlipRow(row, i, r) {
+  row.classList.remove('is-busy');
+  $$('input, select', row).forEach((el) => (el.disabled = false));
+  const res = r || {};
+  batch[i].ref = res.ref || '';
+  $('.slip-amount', row).value = amountText(res.amount);
+  $('.slip-date', row).value = res.date || U.todayISO();
+  $('.slip-title', row).value = res.name || (r ? t(`slip.${res.kind}`) : '');
+  $('.slip-cat', row).value = `expense:${res.category || 'other'}`;
+
+  // ซ้ำกับที่บันทึกไว้แล้ว หรือซ้ำกับรูปก่อนหน้าในชุดนี้ = ไม่ติ๊กให้
+  const ref = batch[i].ref;
+  const saved = ref && state.money.find((m) => m.ref === ref);
+  const twin = ref ? batch.findIndex((b, j) => j < i && b.ref === ref) : -1;
+  const dup = $('.slip-dup', row);
+  if (saved) dup.textContent = t('slip.dup', { title: saved.title, amount: U.formatMoney(saved.amount), date: U.relativeDateLabel(saved.dueDate) });
+  else if (twin > -1) dup.textContent = t('slip.dupBatch', { n: twin + 1 });
+  dup.hidden = !(saved || twin > -1);
+  $('.slip-use', row).checked = !!res.amount && dup.hidden;
+
+  if (!r) setRowStatus(row, t('slip.failed'), { tone: 'warn' });
+  else if (!res.amount) setRowStatus(row, t('slip.noAmount'), { tone: 'warn' });
+  else setRowStatus(row, t('slip.ok'), { tone: 'ok' });
+}
+
+async function readSlipBatch(files) {
+  if (!store || (store.mode === 'firebase' && !store.user)) return;
+  toggleMenu(false);
+  closeBatch();
+  const token = ++batchToken;
+  batch = files.map((file) => ({ file, url: URL.createObjectURL(file), ref: '' }));
+  $('#slips-list').innerHTML = batch.map(slipRowHTML).join('');
+  updateBatch();
+  slipsDialog.showModal();
+  for (let i = 0; i < batch.length; i++) {
+    const row = $(`.slip-row[data-i="${i}"]`, slipsDialog);
+    setRowStatus(row, t('slip.loading'), { busy: true });
+    let r = null;
+    try {
+      r = await readSlip(batch[i].file, ({ stage, pct }) => {
+        if (token === batchToken) setRowStatus(row, stage === 'reading' ? t('slip.reading', { pct }) : t('slip.loading'), { busy: true });
+      });
+    } catch (err) {
+      console.error(err);
+    }
+    if (token !== batchToken) return;
+    fillSlipRow(row, i, r);
+    updateBatch();
+  }
+}
+
+// ปิดหน้าตรวจ: หยุดคิวที่เหลือ และทิ้งรูปทั้งหมดจากหน่วยความจำ
+function closeBatch() {
+  batchToken++;
+  for (const b of batch) URL.revokeObjectURL(b.url);
+  batch = [];
+  $('#slips-list').innerHTML = '';
+  if (slipsDialog.open) slipsDialog.close();
+}
+
+function saveBatch() {
+  const rows = batchRows().filter((r) => $('.slip-use', r).checked);
+  const items = [];
+  for (const row of rows) {
+    const amount = U.toSatang($('.slip-amount', row).value);
+    if (!amount) {
+      setRowStatus(row, t('slip.needAmount'), { tone: 'warn' });
+      $('.slip-amount', row).focus();
+      return;
+    }
+    const [type, category] = $('.slip-cat', row).value.split(':');
+    items.push({
+      type,
+      category,
+      amount,
+      title: $('.slip-title', row).value.trim() || U.moneyCategories(type)[category]?.label || t(`type.${type}`),
+      dueDate: $('.slip-date', row).value || U.todayISO(),
+      ref: batch[Number(row.dataset.i)].ref,
+      tags: [],
+    });
+  }
+  if (!items.length) return;
+  for (const item of items) store.add(item);
+  const total = items.reduce((n, m) => n + (m.type === 'income' ? m.amount : -m.amount), 0);
+  closeBatch();
+  toast(t('slip.batchSaved', { n: items.length, amount: `${total < 0 ? '−' : '+'}${U.formatMoney(Math.abs(total))}` }));
 }
 
 function submitMoneyForm(e) {
@@ -1220,9 +1468,11 @@ const actions = {
     deleteTask(id);
   },
   'close-dialog': closeDialog,
-  'add-money': (el) => openMoneyDialog(null, el.dataset.type),
+  'add-money': (el) => openMoneyDialog(null, el.dataset.type, el.dataset.date),
   'close-money': closeMoneyDialog,
   'slip-pick': () => $('#slip-file').click(),
+  'close-slips': closeBatch,
+  'save-slips': saveBatch,
   'delete-money': () => {
     const id = state.editingId;
     closeMoneyDialog();
@@ -1254,6 +1504,12 @@ const actions = {
     state.filter.tag = '';
     saveFilter();
     setView('list');
+  },
+  'goto-money': (el) => {
+    const now = new Date();
+    state.moneyMonth = new Date(now.getFullYear(), now.getMonth(), 1);
+    state.moneyCat = el.dataset.cat || '';
+    setView('money');
   },
   'goto-calendar': () => {
     state.cal.selected = U.todayISO();
@@ -1379,23 +1635,30 @@ function bindEvents() {
   });
 
   // หน้าการเงิน: วางรูปสลิป (Ctrl+V) หรือลากรูปมาวางเพื่ออ่านได้เลย
-  const slipFrom = (items) => [...(items || [])].find((x) => x.type?.startsWith('image/'));
+  const images = (items) => [...(items || [])].filter((x) => x.type?.startsWith('image/'));
   const canDropSlip = () => state.view === 'money' && store && !(store.mode === 'firebase' && !store.user) && !anyDialogOpen();
   document.addEventListener('paste', (e) => {
-    const item = canDropSlip() && slipFrom(e.clipboardData?.items);
-    if (!item) return;
+    const items = canDropSlip() ? images(e.clipboardData?.items) : [];
+    if (!items.length) return;
     e.preventDefault();
-    readSlipFile(item.getAsFile());
+    readSlipFiles(items.map((x) => x.getAsFile()));
   });
   document.addEventListener('dragover', (e) => {
     if (canDropSlip() && [...(e.dataTransfer?.types || [])].includes('Files')) e.preventDefault();
   });
   document.addEventListener('drop', (e) => {
-    const file = canDropSlip() && slipFrom(e.dataTransfer?.files);
-    if (!file) return;
+    const files = canDropSlip() ? images(e.dataTransfer?.files) : [];
+    if (!files.length) return;
     e.preventDefault();
-    readSlipFile(file);
+    readSlipFiles(files);
   });
+
+  // หน้าตรวจสลิปหลายรูป
+  slipsDialog.addEventListener('close', () => {
+    if (batch.length) closeBatch();
+  });
+  slipsDialog.addEventListener('input', updateBatch);
+  slipsDialog.addEventListener('change', updateBatch);
 
   document.addEventListener('input', (e) => {
     if (e.target.id === 'search-input') {
@@ -1420,9 +1683,9 @@ function bindEvents() {
     } else if (id === 'quick-when') {
       state.quickWhen = e.target.value;
     } else if (id === 'slip-file') {
-      const file = e.target.files?.[0];
+      const files = [...(e.target.files || [])];
       e.target.value = '';
-      readSlipFile(file);
+      readSlipFiles(files);
     } else if (id === 'import-file') {
       const file = e.target.files?.[0];
       e.target.value = '';

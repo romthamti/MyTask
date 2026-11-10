@@ -248,8 +248,27 @@
     </form>
   </dialog>
 
+  <dialog id="slips-dialog" aria-labelledby="slips-title">
+    <div class="slips-wrap">
+      <header class="dialog-head">
+        <h2 id="slips-title"></h2>
+        <button class="icon-btn" type="button" data-action="close-slips" aria-label="ปิด" data-i18n-attr="aria-label:close">
+          <svg viewBox="0 0 24 24" aria-hidden="true"><path d="M6 6l12 12M18 6L6 18" /></svg>
+        </button>
+      </header>
+      <p class="slips-note" data-i18n="slip.private">รูปสลิปใช้อ่านในเครื่องนี้เท่านั้น ไม่ถูกอัปโหลดหรือบันทึก</p>
+      <ul class="slips-list" id="slips-list"></ul>
+      <footer class="dialog-foot">
+        <span class="slips-sum"></span>
+        <span class="spacer"></span>
+        <button class="btn" type="button" data-action="close-slips" data-i18n="cancel">ยกเลิก</button>
+        <button class="btn btn-primary" type="button" data-action="save-slips" id="slips-save"></button>
+      </footer>
+    </div>
+  </dialog>
+
   <input type="file" id="import-file" accept="application/json,.json" hidden />
-  <input type="file" id="slip-file" accept="image/*" hidden />
+  <input type="file" id="slip-file" accept="image/*" multiple hidden />
   <div id="toast" class="toast" role="status" aria-live="polite" hidden></div>
 
   <script type="module" src="js/app.js?v=6"></script>
