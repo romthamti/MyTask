@@ -22,7 +22,9 @@ service cloud.firestore {
         && t.description is string && t.description.size() <= 5000
         && t.priority in ['high', 'medium', 'low']
         && t.done is bool
-        && t.tags is list && t.tags.size() <= 20;
+        && t.tags is list && t.tags.size() <= 20
+        // รายรับรายจ่าย: จำนวนเงินเป็นสตางค์ (จำนวนเต็ม ≥ 0)
+        && (!('amount' in t) || (t.amount is int && t.amount >= 0));
     }
   }
 }

@@ -1,6 +1,7 @@
-import { createStore } from './store.js?v=5';
-import * as U from './utils.js?v=5';
-import { t, getLang, setLang, applyI18n } from './i18n.js?v=5';
+import { createStore } from './store.js?v=6';
+import * as U from './utils.js?v=6';
+import { t, getLang, setLang, applyI18n } from './i18n.js?v=6';
+import { readSlip } from './slip.js?v=6';
 
 const $ = (sel, root = document) => root.querySelector(sel);
 const $$ = (sel, root = document) => [...root.querySelectorAll(sel)];
@@ -20,7 +21,10 @@ const ICONS = {
   search: '<path d="M11 18a7 7 0 1 0 0-14 7 7 0 0 0 0 14zM20 20l-4-4"/>',
   close: '<path d="M6 6l12 12M18 6L6 18"/>',
   inbox: '<path d="M4 13l2.5-7h11l2.5 7v5a1 1 0 0 1-1 1H5a1 1 0 0 1-1-1zM4 13h5l1 2h4l1-2h5"/>',
-  dumbbell: '<path d="M6 7v10M18 7v10M3 10v4M21 10v4M6 12h12"/>',
+  wallet: '<path d="M4 7a2 2 0 0 1 2-2h12a2 2 0 0 1 2 2v10a2 2 0 0 1-2 2H6a2 2 0 0 1-2-2zM4 9h16M16 14h1"/>',
+  up: '<path d="M12 19V5M6 11l6-6 6 6"/>',
+  receipt: '<path d="M6 3h12v18l-3-2-3 2-3-2-3 2zM9 8h6M9 12h6M9 16h3"/>',
+  down: '<path d="M12 5v14M6 13l6 6 6-6"/>',
   pin: '<path d="M12 21s-7-6.2-7-11.5a7 7 0 0 1 14 0C19 14.8 12 21 12 21zM12 12a2.5 2.5 0 1 0 0-5 2.5 2.5 0 0 0 0 5z"/>',
 };
 const icon = (name) => `<svg viewBox="0 0 24 24" aria-hidden="true">${ICONS[name]}</svg>`;
@@ -41,7 +45,9 @@ function savePrefs(patch) {
   } catch {}
 }
 
-const VIEWS = ['dashboard', 'events', 'list', 'calendar', 'fitness'];
+const VIEWS = ['dashboard', 'events', 'list', 'calendar', 'money'];
+// แท็บออกกำลังกายเดิมถูกแทนด้วยแท็บการเงิน
+const savedView = prefs.view === 'fitness' ? 'money' : prefs.view;
 // [ค่า, ข้อความ] · ข้อความเป็นฟังก์ชันเพื่อให้ได้ภาษาที่เลือกอยู่ตอนวาด
 const STATUSES = ['pending', 'overdue', 'done', 'all'].map((v) => [v, () => t(`status.${v}`)]);
 const KINDS = [
@@ -55,10 +61,12 @@ const savedFilter = prefs.filter || {};
 
 const state = {
   tasks: [],
-  // ตารางออกกำลังกาย (workout/meal) แยกจากงาน เพื่อไม่ให้ไปปนในรายการงาน/ปฏิทิน
-  plan: [],
-  fitDay: U.todayISO(),
-  view: VIEWS.includes(prefs.view) ? prefs.view : 'dashboard',
+  // รายรับรายจ่าย แยกจากงาน เพื่อไม่ให้ไปปนในรายการงาน/ปฏิทิน
+  money: [],
+  moneyMonth: new Date(new Date().getFullYear(), new Date().getMonth(), 1),
+  moneyCat: '',
+  quickMoneyType: 'expense',
+  view: VIEWS.includes(savedView) ? savedView : 'dashboard',
   filter: {
     status: STATUSES.some(([v]) => v === savedFilter.status) ? savedFilter.status : 'pending',
     sort: SORTS.some(([v]) => v === savedFilter.sort) ? savedFilter.sort : 'due',
@@ -76,9 +84,9 @@ const saveFilter = () =>
 let store = null;
 const dialog = $('#task-dialog');
 const form = $('#task-form');
-const planDialog = $('#plan-dialog');
-const planForm = $('#plan-form');
-const anyDialogOpen = () => dialog.open || planDialog.open;
+const moneyDialog = $('#money-dialog');
+const moneyForm = $('#money-form');
+const anyDialogOpen = () => dialog.open || moneyDialog.open;
 
 // ---------- เริ่มต้น ----------
 async function init() {
@@ -105,8 +113,8 @@ async function init() {
   };
   store.onAuth(() => render());
   store.subscribe((items) => {
-    state.tasks = items.filter((t) => !U.isPlan(t));
-    state.plan = items.filter(U.isPlan);
+    state.tasks = items.filter((t) => !U.isMoney(t) && !U.isLegacy(t));
+    state.money = items.filter(U.isMoney);
     render();
   });
   // อัปเดตสถานะ "เลยกำหนด" ตามเวลาที่ผ่านไป
@@ -142,7 +150,7 @@ function render() {
   const focusId = el.contains(active) ? active.id : '';
   const caret = focusId && 'selectionStart' in active ? active.selectionStart : null;
 
-  el.innerHTML = { dashboard: dashboardView, events: eventsView, list: listView, calendar: calendarView, fitness: fitnessView }[state.view]();
+  el.innerHTML = { dashboard: dashboardView, events: eventsView, list: listView, calendar: calendarView, money: moneyView }[state.view]();
 
   if (focusId) {
     const f = document.getElementById(focusId);
@@ -635,142 +643,160 @@ function weekHTML(byDate) {
   return `<div class="week">${cols}</div>`;
 }
 
-// ---------- มุมมอง: ออกกำลังกาย ----------
-const planOn = (iso, type) => state.plan.filter((p) => (!type || p.type === type) && U.onDay(p, iso)).sort(U.comparePlan);
-const doneCount = (list, iso) => list.filter((p) => U.isDoneOn(p, iso)).length;
+// ---------- มุมมอง: รายรับรายจ่าย ----------
+const monthKey = () => U.toISODate(state.moneyMonth).slice(0, 7);
+const sumOf = (list) => list.reduce((n, m) => n + m.amount, 0);
+const signed = (m) => `${m.type === 'income' ? '+' : '−'}${U.formatMoney(m.amount)}`;
 
-// จำนวนวันติดกันที่ออกกำลังกายครบตามตาราง (วันพักไม่ตัดสถิติ · วันนี้ยังไม่ครบก็ยังไม่ตัด)
-function workoutStreak() {
-  const workouts = state.plan.filter((p) => p.type === 'workout');
-  let streak = 0;
-  for (let i = 0; i < 400 && workouts.length; i++) {
-    const d = U.addDays(new Date(), -i);
-    const iso = U.toISODate(d);
-    const dayEnd = new Date(d.getFullYear(), d.getMonth(), d.getDate() + 1).getTime();
-    const due = workouts.filter((p) => p.createdAt < dayEnd && U.onDay(p, iso));
-    if (!due.length) continue;
-    if (due.every((p) => U.isDoneOn(p, iso))) streak++;
-    else if (i > 0) break;
-  }
-  return streak;
-}
-
-function planItemHTML(t, iso) {
-  const done = U.isDoneOn(t, iso);
-  const missed = U.isMissedOn(t, iso);
-  const meal = t.type === 'meal';
-  const meta = [];
-  if (meal) meta.push(`<span class="kind-badge">${U.MEALS[t.category].label}</span>`);
-  if (t.dueTime) meta.push(`<span class="meta">${icon('clock')}${t.dueTime}</span>`);
-  meta.push(`<span class="meta">${icon('calendar')}${U.daysLabel(t.days)}</span>`);
-  if (t.description) meta.push(`<span class="meta plan-detail">${esc(t.description)}</span>`);
-  const mark = (status, label, on) =>
-    `<button class="plan-mark mark-${status}" type="button" data-action="plan-mark" data-status="${status}" aria-pressed="${on}">${label}</button>`;
+function moneyItemHTML(m) {
+  const cat = U.moneyCategories(m.type)[m.category];
+  const meta = [`<span class="kind-badge">${cat.label}</span>`];
+  if (m.description) meta.push(`<span class="meta" title="${tr('hasNotes')}">${icon('note')}</span>`);
+  for (const tag of m.tags) meta.push(`<span class="tag">#${esc(tag)}</span>`);
   return `
-    <li class="task plan-${t.type}${done ? ' is-done' : ''}${missed ? ' is-missed' : ''}" data-id="${esc(t.id)}">
+    <li class="task money-item is-${m.type} mcat-${m.category}" data-id="${esc(m.id)}">
+      <span class="event-mark" aria-hidden="true">${icon(m.type === 'income' ? 'down' : 'up')}</span>
       <button class="task-main" type="button" data-action="edit">
-        <span class="task-title">${esc(t.title)}</span>
+        <span class="task-title">${esc(m.title)}</span>
         <span class="task-meta">${meta.join('')}</span>
       </button>
-      <div class="plan-marks">
-        ${meal ? mark('done', tr('plan.ate'), done) + mark('missed', tr('plan.missed'), missed) : mark('done', tr('plan.done'), done)}
-      </div>
+      <span class="money-amount">${signed(m)}</span>
       <button class="icon-btn task-del" type="button" data-action="delete" aria-label="${tr('delete')}">${icon('trash')}</button>
     </li>`;
 }
 
-function planPanelHTML(title, type, list, iso, empty) {
-  return `
-    <section class="panel">
-      <header class="panel-head">
-        <h2>${title}</h2>
-        <span class="count">${doneCount(list, iso)}/${list.length}</span>
-        <button class="btn btn-sm" type="button" data-action="add-plan" data-type="${type}">${icon('plus')}${t('add')}</button>
-      </header>
-      ${list.length ? `<ul class="task-list">${list.map((p) => planItemHTML(p, iso)).join('')}</ul>` : `<p class="panel-empty">${empty}</p>`}
-    </section>`;
+// แถบสัดส่วนตามหมวด · กดเพื่อกรองรายการ (กดซ้ำ = ยกเลิก)
+function moneyCatRowsHTML(type, list) {
+  const rows = Object.entries(U.moneyCategories(type))
+    .map(([k, c]) => [k, c.label, sumOf(list.filter((m) => m.category === k))])
+    .filter(([, , n]) => n > 0)
+    .sort((a, b) => b[2] - a[2]);
+  const max = Math.max(1, ...rows.map(([, , n]) => n));
+  return `<ul class="cat-rows money-rows">${rows
+    .map(
+      ([k, label, n]) => `
+      <li><button class="cat-row mcat-${k}" type="button" data-action="money-cat" data-cat="${k}" aria-pressed="${state.moneyCat === k}">
+        <span class="cat-name">${label}</span>
+        <span class="cat-bar"><span style="width:${Math.round((n / max) * 100)}%"></span></span>
+        <span class="cat-count">${U.formatMoney(n)}</span>
+      </button></li>`,
+    )
+    .join('')}</ul>`;
 }
 
-function fitnessView() {
-  const day = state.fitDay;
-  const today = U.todayISO();
-  const start = U.startOfWeek(U.parseISODate(day));
+function moneyView() {
+  const month = state.moneyMonth;
+  const now = new Date();
+  const isThisMonth = month.getFullYear() === now.getFullYear() && month.getMonth() === now.getMonth();
   const head = `
     <div class="cal-head">
       <div>
-        <p class="eyebrow">${U.F.dayMonth.format(start)} – ${U.F.dayMonthYear.format(U.addDays(start, 6))}</p>
-        <h1 class="cal-title">${t('view.fitness')}</h1>
+        <p class="eyebrow">${t('money.title')}</p>
+        <h1 class="cal-title">${U.F.monthYear.format(month)}</h1>
       </div>
       <div class="cal-nav">
-        <button class="icon-btn" type="button" data-action="fit-shift" data-days="-7" aria-label="${t('fit.prevWeek')}">${icon('left')}</button>
-        <button class="btn btn-sm" type="button" data-action="fit-day" data-date="${today}">${t('today')}</button>
-        <button class="icon-btn" type="button" data-action="fit-shift" data-days="7" aria-label="${t('fit.nextWeek')}">${icon('right')}</button>
+        <button class="icon-btn" type="button" data-action="money-month" data-n="-1" aria-label="${t('money.prevMonth')}">${icon('left')}</button>
+        <button class="btn btn-sm" type="button" data-action="money-month" data-n="0"${isThisMonth ? ' disabled' : ''}>${t('money.thisMonth')}</button>
+        <button class="icon-btn" type="button" data-action="money-month" data-n="1" aria-label="${t('money.nextMonth')}">${icon('right')}</button>
       </div>
-    </div>`;
+    </div>
+    <form class="quick-add money-quick" id="money-quick" autocomplete="off">
+      <div class="segmented money-type" role="group" aria-label="${t('type')}">
+        ${U.MONEY_TYPES.map((v) => `<button type="button" class="is-${v}" data-action="quick-money-type" data-type="${v}" aria-pressed="${state.quickMoneyType === v}">${t(`type.${v}`)}</button>`).join('')}
+      </div>
+      <input id="money-quick-input" maxlength="200" placeholder="${t('quick.money')}" aria-label="${t('quick.moneyAria')}" />
+      <button class="btn slip-btn" type="button" data-action="slip-pick" title="${t('slip.hint')}">${icon('receipt')}<span>${t('slip.read')}</span></button>
+      <button class="btn btn-primary" type="submit">${t('add')}</button>
+    </form>`;
 
-  if (!state.plan.length) {
+  if (!state.money.length) {
     return `${head}
       <div class="empty">
-        ${icon('dumbbell')}
-        <h2>${t('fit.empty')}</h2>
-        <p>${t('fit.emptyText')}</p>
+        ${icon('wallet')}
+        <h2>${t('money.empty')}</h2>
+        <p>${t('money.emptyText')}</p>
         <div class="panel-actions">
-          <button class="btn btn-primary" type="button" data-action="add-plan" data-type="workout">${icon('plus')}${t('type.workout')}</button>
-          <button class="btn" type="button" data-action="add-plan" data-type="meal">${icon('plus')}${t('type.meal')}</button>
+          <button class="btn btn-primary" type="button" data-action="add-money" data-type="expense">${icon('plus')}${t('type.expense')}</button>
+          <button class="btn" type="button" data-action="add-money" data-type="income">${icon('plus')}${t('type.income')}</button>
+          <button class="btn" type="button" data-action="slip-pick">${icon('receipt')}${t('slip.read')}</button>
         </div>
       </div>`;
   }
 
-  let weekTotal = 0;
-  let weekDone = 0;
-  const pills = [];
-  for (let i = 0; i < 7; i++) {
-    const d = U.addDays(start, i);
-    const iso = U.toISODate(d);
-    const list = planOn(iso);
-    const n = doneCount(list, iso);
-    weekTotal += list.length;
-    weekDone += n;
-    const complete = list.length && n === list.length;
-    pills.push(`
-      <button class="day-pill${iso === today ? ' is-today' : ''}" type="button" data-action="fit-day" data-date="${iso}"
-        aria-pressed="${iso === day}" aria-label="${t('fit.pillAria', { date: U.F.full.format(d), n, total: list.length })}">
-        <span class="wd">${U.weekdayShort(i)}</span>
-        <span class="wn">${d.getDate()}</span>
-        <span class="wc${complete ? ' is-complete' : ''}">${complete ? '✓' : list.length ? `${n}/${list.length}` : ''}</span>
-      </button>`);
+  const items = state.money.filter((m) => m.dueDate.startsWith(monthKey()));
+  const incomes = items.filter((m) => m.type === 'income');
+  const expenses = items.filter((m) => m.type === 'expense');
+  const income = sumOf(incomes);
+  const expense = sumOf(expenses);
+  const balance = income - expense;
+  // เฉลี่ยต่อวัน: เดือนนี้นับถึงวันนี้ · เดือนอื่นนับทั้งเดือน
+  const days = isThisMonth ? now.getDate() : new Date(month.getFullYear(), month.getMonth() + 1, 0).getDate();
+
+  const cat = state.moneyCat;
+  const shown = items
+    .filter((m) => !cat || m.category === cat)
+    .sort((a, b) => b.dueDate.localeCompare(a.dueDate) || b.createdAt - a.createdAt);
+  let list = '';
+  let current = null;
+  for (const m of shown) {
+    if (m.dueDate !== current) {
+      if (current !== null) list += '</ul></section>';
+      current = m.dueDate;
+      const day = shown.filter((x) => x.dueDate === current);
+      const net = sumOf(day.filter((x) => x.type === 'income')) - sumOf(day.filter((x) => x.type === 'expense'));
+      const sign = net < 0 ? '−' : net > 0 ? '+' : '';
+      list += `
+        <section class="money-day">
+          <h3 class="group-title">
+            <span>${esc(U.relativeDateLabel(current))} · ${esc(U.F.weekdayLong.format(U.parseISODate(current)))}</span>
+            <span class="money-net${net < 0 ? ' is-neg' : ''}">${sign}${U.formatMoney(Math.abs(net))}</span>
+          </h3>
+          <ul class="task-list">`;
+    }
+    list += moneyItemHTML(m);
   }
+  if (current !== null) list += '</ul></section>';
+  const catLabel = cat && (U.EXPENSE_CATEGORIES[cat] || U.INCOME_CATEGORIES[cat])?.label;
 
-  const workouts = planOn(day, 'workout');
-  const meals = planOn(day, 'meal');
-  const dayLabel = day === today ? t('today') : U.F.weekdayLong.format(U.parseISODate(day));
-  const pct = (n, total) => (total ? Math.round((n / total) * 100) : 0);
-  const stat = (label, n, total, sub) => `
-    <div class="stat">
-      <span class="stat-label">${label}</span>
-      <span class="stat-value">${n}/${total}</span>
-      <span class="progress" role="progressbar" aria-valuenow="${pct(n, total)}" aria-valuemin="0" aria-valuemax="100"><span style="width:${pct(n, total)}%"></span></span>
-      <span class="stat-sub">${sub}</span>
-    </div>`;
-  const streak = workoutStreak();
-  const missedMeals = meals.filter((p) => U.isMissedOn(p, day)).length;
-
-  return `
-    ${head}
-    <div class="day-strip">${pills.join('')}</div>
+  return `${head}
     <section class="stats">
-      ${stat(t('fit.workoutDay', { day: dayLabel }), doneCount(workouts, day), workouts.length, t(workouts.length ? 'fit.doneItems' : 'fit.rest'))}
-      ${stat(t('fit.mealDay', { day: dayLabel }), doneCount(meals, day), meals.length, missedMeals ? t('fit.mealsMissed', { n: missedMeals }) : t('fit.mealsEaten'))}
-      ${stat(t('fit.thisWeek'), weekDone, weekTotal, t('fit.donePct', { pct: pct(weekDone, weekTotal) }))}
+      <button class="stat stat-income" type="button" data-action="add-money" data-type="income">
+        <span class="stat-label">${t('type.income')}</span>
+        <span class="stat-value">${U.formatMoney(income)}</span>
+        <span class="stat-sub">${t('items', { n: incomes.length })}</span>
+      </button>
+      <button class="stat stat-expense" type="button" data-action="add-money" data-type="expense">
+        <span class="stat-label">${t('type.expense')}</span>
+        <span class="stat-value">${U.formatMoney(expense)}</span>
+        <span class="stat-sub">${t('items', { n: expenses.length })}</span>
+      </button>
+      <div class="stat${balance < 0 ? ' stat-danger' : ''}">
+        <span class="stat-label">${t('money.balance')}</span>
+        <span class="stat-value">${balance < 0 ? '−' : ''}${U.formatMoney(Math.abs(balance))}</span>
+        <span class="stat-sub">${t('money.balanceSub')}</span>
+      </div>
       <div class="stat">
-        <span class="stat-label">${t('fit.streak')}</span>
-        <span class="stat-value">${t('fit.days', { n: streak })}</span>
-        <span class="stat-sub">${t(streak ? 'fit.streakOn' : 'fit.streakOff')}</span>
+        <span class="stat-label">${t('money.avg')}</span>
+        <span class="stat-value">${U.formatMoney(Math.round(expense / days))}</span>
+        <span class="stat-sub">${t('money.avgSub', { n: days })}</span>
       </div>
     </section>
-    <div class="dash-grid">
-      ${planPanelHTML(t('type.workout'), 'workout', workouts, day, t('fit.emptyWorkout'))}
-      ${planPanelHTML(t('type.meal'), 'meal', meals, day, t('fit.emptyMeal'))}
+    <div class="money-grid">
+      <div class="money-side">
+        <section class="panel">
+          <header class="panel-head"><h2>${t('money.byExpense')}</h2></header>
+          ${expenses.length ? moneyCatRowsHTML('expense', expenses) : `<p class="panel-empty">${t('money.noExpense')}</p>`}
+        </section>
+        ${incomes.length ? `<section class="panel"><header class="panel-head"><h2>${t('money.byIncome')}</h2></header>${moneyCatRowsHTML('income', incomes)}</section>` : ''}
+      </div>
+      <section class="panel money-list">
+        <header class="panel-head">
+          <h2>${catLabel ? `${t('money.items')} · ${catLabel}` : t('money.items')}</h2>
+          <span class="count">${shown.length}</span>
+          ${cat ? `<button class="btn btn-sm" type="button" data-action="money-cat" data-cat="">${icon('close')}${t('money.clearFilter')}</button>` : ''}
+        </header>
+        ${list || `<p class="panel-empty">${t(cat ? 'money.emptyCat' : 'money.emptyMonth')}</p>`}
+      </section>
     </div>`;
 }
 
@@ -790,23 +816,8 @@ function shiftCal(n) {
 
 function toggleTask(id) {
   const t = store.get(id);
-  if (!t || U.isEvent(t)) return;
-  if (U.isPlan(t)) markPlan(id, 'done');
-  else store.update(id, { done: !t.done });
-}
-
-// รายการในตาราง: บันทึกแยกเป็นรายวัน ตามวันที่กำลังดูอยู่ · status = done (ทำแล้ว/กินแล้ว) | missed (ลืมกิน)
-// กดปุ่มเดิมซ้ำ = ยกเลิก · ทำแล้วกับลืมกินอยู่พร้อมกันไม่ได้
-function markPlan(id, status) {
-  const t = store.get(id);
-  if (!t || !U.isPlan(t)) return;
-  const iso = state.fitDay;
-  const without = (list) => list.filter((d) => d !== iso);
-  const on = status === 'missed' ? U.isMissedOn(t, iso) : U.isDoneOn(t, iso);
-  store.update(id, {
-    doneDates: status === 'done' && !on ? [...t.doneDates, iso] : without(t.doneDates),
-    missedDates: status === 'missed' && !on && t.type === 'meal' ? [...t.missedDates, iso] : without(t.missedDates),
-  });
+  if (!t || U.isEvent(t) || U.isMoney(t)) return;
+  store.update(id, { done: !t.done });
 }
 
 function deleteTask(id) {
@@ -913,68 +924,188 @@ function submitTaskForm(e) {
   closeDialog();
 }
 
-// ---------- ฟอร์มตารางออกกำลังกาย ----------
-function openPlanDialog(item = null, type = 'workout') {
+// ---------- ฟอร์มรายรับรายจ่าย ----------
+const moneyTags = () => [...new Set(state.money.flatMap((m) => m.tags))].sort((a, b) => a.localeCompare(b, 'th'));
+// แสดงจำนวนเงินในช่องกรอก (สตางค์ → "125.5")
+const amountText = (satang) => (satang ? String(satang / 100) : '');
+
+function openMoneyDialog(item = null, type = state.quickMoneyType) {
   if (!store || (store.mode === 'firebase' && !store.user)) return;
   toggleMenu(false);
   state.editingId = item?.id || null;
-  const f = planForm.elements;
-  planForm.reset();
-  planForm.classList.toggle('is-edit', !!item);
+  const f = moneyForm.elements;
+  moneyForm.reset();
+  moneyForm.classList.toggle('is-edit', !!item);
   f.type.value = item?.type || type;
+  f.amount.value = amountText(item?.amount);
   f.title.value = item?.title || '';
   f.description.value = item?.description || '';
-  f.dueTime.value = item?.dueTime || '';
-  const hour = new Date().getHours();
-  f.meal.value = item?.type === 'meal' ? item.category : hour < 10 ? 'breakfast' : hour < 14 ? 'lunch' : hour < 17 ? 'snack' : 'dinner';
-  const days = item?.days || [];
-  for (const box of f.days) box.checked = days.includes(Number(box.value));
-  $('.field-error', planForm).hidden = true;
-  syncPlanType();
-  planDialog.showModal();
-  if (!item) f.title.focus();
+  f.tags.value = item ? item.tags.join(', ') : '';
+  f.ref.value = item?.ref || '';
+  hideSlip();
+  // เพิ่มใหม่: ถ้ากำลังดูเดือนอื่น ใช้วันแรกของเดือนนั้น
+  f.dueDate.value = item?.dueDate || (U.todayISO().startsWith(monthKey()) ? U.todayISO() : U.toISODate(state.moneyMonth));
+  delete moneyForm.dataset.type;
+  for (const k in pickedCat) delete pickedCat[k];
+  syncMoneyType(item?.category || state.moneyCat);
+  $('.amount-error', moneyForm).hidden = true;
+  $('#money-tag-options').innerHTML = moneyTags().map((tag) => `<option value="${esc(tag)}"></option>`).join('');
+  moneyDialog.showModal();
+  if (!item) f.amount.focus();
 }
 
-function syncPlanType() {
-  const f = planForm.elements;
-  const meal = f.type.value === 'meal';
-  planForm.dataset.type = meal ? 'meal' : 'workout';
-  $('#plan-dialog-title').textContent = t(`dlg.${state.editingId ? 'edit' : 'add'}${meal ? 'Meal' : 'Workout'}`);
-  f.title.placeholder = t(meal ? 'ph.meal' : 'ph.workout');
-  f.description.placeholder = t(meal ? 'ph.mealDesc' : 'ph.workoutDesc');
+// สร้างปุ่มหมวดตามประเภท (รายจ่าย / รายรับ) · จำหมวดที่เลือกไว้ของแต่ละประเภท เผื่อสลับกลับ
+const pickedCat = {};
+function syncMoneyType(keep = '') {
+  const f = moneyForm.elements;
+  const prev = moneyForm.dataset.type;
+  const checked = moneyForm.querySelector('[name="category"]:checked')?.value;
+  if (prev && checked) pickedCat[prev] = checked;
+  const type = f.type.value === 'income' ? 'income' : 'expense';
+  const cats = U.moneyCategories(type);
+  const current = keep || pickedCat[type];
+  const selected = cats[current] ? current : Object.keys(cats)[0];
+  moneyForm.dataset.type = type;
+  $('#money-dialog-title').textContent = t(`dlg.${state.editingId ? 'edit' : 'add'}${type === 'income' ? 'Income' : 'Expense'}`);
+  f.title.placeholder = t(`ph.${type}`);
+  $('#money-cats').innerHTML = Object.entries(cats)
+    .map(([k, c]) => `<label class="mcat-${k}"><input type="radio" name="category" value="${k}"${k === selected ? ' checked' : ''} /><span>${c.label}</span></label>`)
+    .join('');
 }
 
-function closePlanDialog() {
-  if (planDialog.open) planDialog.close();
+function closeMoneyDialog() {
+  if (moneyDialog.open) moneyDialog.close();
   state.editingId = null;
 }
 
-function submitPlanForm(e) {
-  e.preventDefault();
-  const f = planForm.elements;
-  const title = f.title.value.trim();
-  if (!title) {
-    $('.field-error', planForm).hidden = false;
-    f.title.focus();
+// ---------- อ่านสลิป ----------
+// รูปอยู่ในหน่วยความจำระหว่างที่หน้าต่างเปิดเท่านั้น ปิดแล้วทิ้งทันที ไม่บันทึกที่ไหน
+let slipUrl = '';
+let slipToken = 0;
+const slipBox = $('.slip-box', moneyForm);
+
+function hideSlip() {
+  slipToken++;
+  if (slipUrl) URL.revokeObjectURL(slipUrl);
+  slipUrl = '';
+  $('.slip-img', slipBox).removeAttribute('src');
+  slipBox.hidden = true;
+}
+
+function slipStatus(msg, { busy = false, tone = '' } = {}) {
+  const el = $('.slip-status', slipBox);
+  el.className = `slip-status${busy ? ' is-busy' : ''}${tone ? ` is-${tone}` : ''}`;
+  $('.slip-msg', slipBox).textContent = msg;
+}
+
+async function readSlipFile(file) {
+  if (!file) return;
+  if (!file.type.startsWith('image/')) return toast(t('slip.notImage'));
+  openMoneyDialog(null, 'expense');
+  if (!moneyDialog.open) return;
+  const token = ++slipToken;
+  slipUrl = URL.createObjectURL(file);
+  $('.slip-img', slipBox).src = slipUrl;
+  $('.slip-dup', slipBox).hidden = true;
+  slipBox.hidden = false;
+  slipStatus(t('slip.loading'), { busy: true });
+  let r;
+  try {
+    r = await readSlip(file, ({ stage, pct }) => {
+      if (token === slipToken) slipStatus(stage === 'reading' ? t('slip.reading', { pct }) : t('slip.loading'), { busy: true });
+    });
+  } catch (err) {
+    console.error(err);
+    if (token === slipToken) slipStatus(t('slip.failed'), { tone: 'warn' });
     return;
   }
-  const type = f.type.value === 'meal' ? 'meal' : 'workout';
+  if (token !== slipToken || !moneyDialog.open) return;
+
+  // กรอกให้เฉพาะช่องที่ผู้ใช้ยังไม่ได้พิมพ์เอง
+  const f = moneyForm.elements;
+  if (r.amount && !f.amount.value) f.amount.value = amountText(r.amount);
+  if (r.date) f.dueDate.value = r.date;
+  if (!f.title.value) f.title.value = r.name || t(`slip.${r.kind}`);
+  // เดาหมวดไม่ได้ = อื่นๆ
+  if (f.type.value === 'expense') syncMoneyType(r.category || 'other');
+  f.ref.value = r.ref;
+  slipStatus(t(r.amount ? 'slip.done' : 'slip.noAmount'), { tone: r.amount ? 'ok' : 'warn' });
+
+  const dup = r.ref && state.money.find((m) => m.ref === r.ref);
+  if (dup) {
+    const el = $('.slip-dup', slipBox);
+    el.textContent = t('slip.dup', { title: dup.title, date: U.relativeDateLabel(dup.dueDate), amount: U.formatMoney(dup.amount) });
+    el.hidden = false;
+  }
+  if (!r.amount) f.amount.focus();
+}
+
+function submitMoneyForm(e) {
+  e.preventDefault();
+  const f = moneyForm.elements;
+  const amount = U.toSatang(f.amount.value);
+  if (!amount) {
+    $('.amount-error', moneyForm).hidden = false;
+    f.amount.focus();
+    return;
+  }
+  const type = f.type.value === 'income' ? 'income' : 'expense';
+  const category = moneyForm.querySelector('[name="category"]:checked')?.value || '';
   const data = {
     type,
-    category: type === 'meal' ? f.meal.value : '',
-    title,
+    category,
+    amount,
+    // ไม่ใส่ชื่อ = ใช้ชื่อหมวด
+    title: f.title.value.trim() || U.moneyCategories(type)[category]?.label || t(`type.${type}`),
     description: f.description.value.trim(),
-    dueTime: f.dueTime.value,
-    days: [...f.days].filter((b) => b.checked).map((b) => Number(b.value)),
+    dueDate: f.dueDate.value || U.todayISO(),
+    tags: f.tags.value.split(/[,，]/).map((s) => s.trim()).filter(Boolean),
+    ref: f.ref.value,
   };
   if (state.editingId && store.get(state.editingId)) {
     store.update(state.editingId, data);
     toast(t('toast.saved'));
   } else {
     store.add(data);
-    toast(t('toast.planAdded'));
+    toast(t(`toast.${type}Added`, { amount: U.formatMoney(amount) }));
   }
-  closePlanDialog();
+  closeMoneyDialog();
+}
+
+// เพิ่มด่วน: "ข้าวมันไก่ 50 #อาหาร" → ชื่อ, จำนวนเงิน (ตัวเลขตัวสุดท้าย), หมวด (#ชื่อหมวด) และแท็ก
+function quickMoney(e) {
+  e.preventDefault();
+  const input = $('#money-quick-input');
+  const raw = input.value.trim();
+  if (!raw) return;
+  const type = state.quickMoneyType;
+  const last = [...raw.matchAll(/(^|\s)฿?(\d[\d,]*(?:\.\d{1,2})?)\s*(?:บาท|฿)?(?=\s|$)/g)].at(-1);
+  const amount = last ? U.toSatang(last[2]) : 0;
+  if (!amount) {
+    toast(t('toast.needAmount'));
+    input.focus();
+    return;
+  }
+  const cats = U.moneyCategories(type);
+  let category = '';
+  const tags = [];
+  for (const [, word] of raw.matchAll(/#([^\s#]+)/g)) {
+    const hit = Object.entries(cats).find(([k, c]) => [k, c.label].some((x) => x.toLowerCase() === word.toLowerCase()));
+    if (hit && !category) category = hit[0];
+    else tags.push(word);
+  }
+  const title = (raw.slice(0, last.index) + last[1] + raw.slice(last.index + last[0].length))
+    .replace(/#[^\s#]+/g, '')
+    .replace(/\s+/g, ' ')
+    .trim();
+  // ไม่ระบุหมวด = อื่นๆ (หมวดสุดท้าย)
+  const cat = category || Object.keys(cats).at(-1);
+  store.add({ type, category: cat, amount, title: title || cats[cat].label, tags, dueDate: U.todayISO() });
+  input.value = '';
+  // ให้เห็นรายการที่เพิ่งเพิ่ม
+  const now = new Date();
+  state.moneyMonth = new Date(now.getFullYear(), now.getMonth(), 1);
+  toast(t(`toast.${type}Added`, { amount: U.formatMoney(amount) }));
 }
 
 function quickAdd(e) {
@@ -992,7 +1123,7 @@ function quickAdd(e) {
 }
 
 function exportJSON() {
-  // รวมตารางออกกำลังกายด้วย (store.tasks = ทุกรายการ)
+  // รวมรายรับรายจ่ายด้วย (store.tasks = ทุกรายการ)
   const data = { app: 'mytodo', version: 1, exportedAt: new Date().toISOString(), tasks: store.tasks };
   const url = URL.createObjectURL(new Blob([JSON.stringify(data, null, 2)], { type: 'application/json' }));
   const a = Object.assign(document.createElement('a'), { href: url, download: `mildtask-${U.todayISO()}.json` });
@@ -1074,15 +1205,14 @@ const isTyping = () => {
 
 // ---------- ผูกเหตุการณ์ ----------
 const actions = {
-  add: () => (state.view === 'fitness' ? openPlanDialog() : openTaskDialog()),
+  add: () => (state.view === 'money' ? openMoneyDialog() : openTaskDialog()),
   'add-on': (el) => openTaskDialog({ date: el.dataset.date }),
   'add-event-on': (el) => openTaskDialog({ date: el.dataset.date, type: 'event' }),
   edit: (el, id) => {
     const t = store.get(id);
-    if (t) U.isPlan(t) ? openPlanDialog(t) : openTaskDialog({ task: t });
+    if (t) U.isMoney(t) ? openMoneyDialog(t) : openTaskDialog({ task: t });
   },
   toggle: (el, id) => toggleTask(id),
-  'plan-mark': (el, id) => markPlan(id, el.dataset.status),
   delete: (el, id) => deleteTask(id),
   'delete-from-dialog': () => {
     const id = state.editingId;
@@ -1090,19 +1220,26 @@ const actions = {
     deleteTask(id);
   },
   'close-dialog': closeDialog,
-  'add-plan': (el) => openPlanDialog(null, el.dataset.type),
-  'close-plan': closePlanDialog,
-  'delete-plan': () => {
+  'add-money': (el) => openMoneyDialog(null, el.dataset.type),
+  'close-money': closeMoneyDialog,
+  'slip-pick': () => $('#slip-file').click(),
+  'delete-money': () => {
     const id = state.editingId;
-    closePlanDialog();
+    closeMoneyDialog();
     deleteTask(id);
   },
-  'fit-day': (el) => {
-    state.fitDay = el.dataset.date;
+  'money-month': (el) => {
+    const n = Number(el.dataset.n);
+    const base = n ? state.moneyMonth : new Date();
+    state.moneyMonth = new Date(base.getFullYear(), base.getMonth() + n, 1);
     render();
   },
-  'fit-shift': (el) => {
-    state.fitDay = U.toISODate(U.addDays(U.parseISODate(state.fitDay), Number(el.dataset.days)));
+  'money-cat': (el) => {
+    state.moneyCat = state.moneyCat === el.dataset.cat ? '' : el.dataset.cat;
+    render();
+  },
+  'quick-money-type': (el) => {
+    state.quickMoneyType = el.dataset.type;
     render();
   },
   'set-status': (el) => {
@@ -1205,6 +1342,7 @@ function bindEvents() {
 
   document.addEventListener('submit', (e) => {
     if (e.target.id === 'quick-add') quickAdd(e);
+    else if (e.target.id === 'money-quick') quickMoney(e);
   });
   form.addEventListener('submit', submitTaskForm);
   form.elements.title.addEventListener('input', () => {
@@ -1225,18 +1363,38 @@ function bindEvents() {
     state.editingId = null;
   });
 
-  planForm.addEventListener('submit', submitPlanForm);
-  planForm.elements.title.addEventListener('input', () => {
-    $('.field-error', planForm).hidden = true;
+  moneyForm.addEventListener('submit', submitMoneyForm);
+  moneyForm.elements.amount.addEventListener('input', () => {
+    $('.amount-error', moneyForm).hidden = true;
   });
-  planForm.addEventListener('change', (e) => {
-    if (e.target.name === 'type') syncPlanType();
+  moneyForm.addEventListener('change', (e) => {
+    if (e.target.name === 'type') syncMoneyType();
   });
-  planDialog.addEventListener('click', (e) => {
-    if (e.target === planDialog) closePlanDialog();
+  moneyDialog.addEventListener('click', (e) => {
+    if (e.target === moneyDialog) closeMoneyDialog();
   });
-  planDialog.addEventListener('close', () => {
+  moneyDialog.addEventListener('close', () => {
     state.editingId = null;
+    hideSlip();
+  });
+
+  // หน้าการเงิน: วางรูปสลิป (Ctrl+V) หรือลากรูปมาวางเพื่ออ่านได้เลย
+  const slipFrom = (items) => [...(items || [])].find((x) => x.type?.startsWith('image/'));
+  const canDropSlip = () => state.view === 'money' && store && !(store.mode === 'firebase' && !store.user) && !anyDialogOpen();
+  document.addEventListener('paste', (e) => {
+    const item = canDropSlip() && slipFrom(e.clipboardData?.items);
+    if (!item) return;
+    e.preventDefault();
+    readSlipFile(item.getAsFile());
+  });
+  document.addEventListener('dragover', (e) => {
+    if (canDropSlip() && [...(e.dataTransfer?.types || [])].includes('Files')) e.preventDefault();
+  });
+  document.addEventListener('drop', (e) => {
+    const file = canDropSlip() && slipFrom(e.dataTransfer?.files);
+    if (!file) return;
+    e.preventDefault();
+    readSlipFile(file);
   });
 
   document.addEventListener('input', (e) => {
@@ -1261,6 +1419,10 @@ function bindEvents() {
       render();
     } else if (id === 'quick-when') {
       state.quickWhen = e.target.value;
+    } else if (id === 'slip-file') {
+      const file = e.target.files?.[0];
+      e.target.value = '';
+      readSlipFile(file);
     } else if (id === 'import-file') {
       const file = e.target.files?.[0];
       e.target.value = '';

@@ -1,4 +1,4 @@
-import { t, locale } from './i18n.js?v=5';
+import { t, locale } from './i18n.js?v=6';
 
 // ---------- วันที่ ----------
 export const pad = (n) => String(n).padStart(2, '0');
@@ -90,81 +90,92 @@ export const EVENT_CATEGORIES = labelled('cat', {
   other: {},
 });
 
-// ตารางออกกำลังกาย: workout = สิ่งที่ต้องทำ · meal = สิ่งที่ต้องกิน
-// ทำซ้ำทุกสัปดาห์ตามวันที่เลือก (days ว่าง = ทุกวัน) · doneDates = วันที่ทำแล้ว/กินแล้ว · missedDates = วันที่ลืมกิน
-export const PLAN_TYPES = ['workout', 'meal'];
-export const MEALS = labelled('meal', {
-  breakfast: { rank: 0 },
-  lunch: { rank: 1 },
-  snack: { rank: 2 },
-  dinner: { rank: 3 },
+// รายรับรายจ่าย: amount เก็บเป็นสตางค์ (จำนวนเต็ม) เพื่อไม่ให้ทศนิยมเพี้ยนตอนรวมยอด
+export const MONEY_TYPES = ['expense', 'income'];
+export const EXPENSE_CATEGORIES = labelled('mcat', {
+  food: {},
+  transport: {},
+  shopping: {},
+  bills: {},
+  health: {},
+  fun: {},
+  other: {},
 });
-const ISO_DATE = /^\d{4}-\d{2}-\d{2}$/;
+export const INCOME_CATEGORIES = labelled('mcat', {
+  salary: {},
+  bonus: {},
+  sales: {},
+  otherIncome: {},
+});
+export const moneyCategories = (type) => (type === 'income' ? INCOME_CATEGORIES : EXPENSE_CATEGORIES);
+const defaultMoneyCategory = (type) => (type === 'income' ? 'otherIncome' : 'other');
 
-// เก็บย้อนหลังพอสำหรับนับวันต่อเนื่อง (Firestore จำกัดขนาดเอกสาร)
-const isoDates = (a) => (Array.isArray(a) ? [...new Set(a.filter((d) => ISO_DATE.test(d)))].sort().slice(-400) : []);
+// ข้อมูลตารางออกกำลังกายเดิม (เลิกใช้แล้ว): เก็บไว้ตามเดิมโดยไม่แตะ และไม่แสดงในแอป
+const LEGACY_TYPES = ['workout', 'meal'];
+export const isLegacy = (t) => LEGACY_TYPES.includes(t.type);
+
+const ISO_DATE = /^\d{4}-\d{2}-\d{2}$/;
+// id ต้องใช้เป็นชื่อเอกสาร Firestore ได้ (ห้ามมี /)
+const validId = (id) => (typeof id === 'string' && /^[\w-]{1,64}$/.test(id) ? id : uid());
 
 // ทำให้ข้อมูลงานมีรูปแบบเดียวกันเสมอ (ใช้ทั้งตอนบันทึกและตอนนำเข้า)
 export function normalizeTask(t = {}) {
+  if (isLegacy(t)) return { ...t, id: validId(t.id) };
   const now = Date.now();
-  const type = t.type === 'event' || PLAN_TYPES.includes(t.type) ? t.type : 'task';
+  const type = t.type === 'event' || MONEY_TYPES.includes(t.type) ? t.type : 'task';
   const event = type === 'event';
-  const plan = PLAN_TYPES.includes(type);
+  const money = MONEY_TYPES.includes(type);
   const done = type === 'task' && !!t.done;
+  const createdAt = Number(t.createdAt) || now;
   return {
-    // id ต้องใช้เป็นชื่อเอกสาร Firestore ได้ (ห้ามมี /)
-    id: typeof t.id === 'string' && /^[\w-]{1,64}$/.test(t.id) ? t.id : uid(),
-    // task = งานที่ต้องทำ (ติ๊กเสร็จได้) · event = กิจกรรม/นัดหมาย (มีวันเวลา ไม่ต้องติ๊ก) · workout/meal = ตารางออกกำลังกาย
+    id: validId(t.id),
+    // task = งานที่ต้องทำ (ติ๊กเสร็จได้) · event = กิจกรรม/นัดหมาย · expense/income = รายจ่าย/รายรับ
     type,
     category: event
       ? (EVENT_CATEGORIES[t.category] ? t.category : 'other')
-      : type === 'meal' ? (MEALS[t.category] ? t.category : 'lunch') : '',
+      : money ? (moneyCategories(type)[t.category] ? t.category : defaultMoneyCategory(type)) : '',
     title: String(t.title ?? '').trim().slice(0, 200),
     description: String(t.description ?? '').slice(0, 5000),
-    dueDate: !plan && ISO_DATE.test(t.dueDate) ? t.dueDate : null,
-    days: plan && Array.isArray(t.days)
-      ? [...new Set(t.days.map(Number))].filter((d) => Number.isInteger(d) && d >= 0 && d <= 6).sort()
-      : [],
-    doneDates: plan ? isoDates(t.doneDates) : [],
-    missedDates: type === 'meal' ? isoDates(t.missedDates).filter((d) => !t.doneDates?.includes(d)) : [],
-    dueTime: /^\d{2}:\d{2}$/.test(t.dueTime) ? t.dueTime : '',
-    endTime: /^\d{2}:\d{2}$/.test(t.endTime) ? t.endTime : '',
-    location: String(t.location ?? '').trim().slice(0, 200),
+    // รายการเงินต้องมีวันที่เสมอ
+    dueDate: ISO_DATE.test(t.dueDate) ? t.dueDate : money ? toISODate(new Date(createdAt)) : null,
+    dueTime: !money && /^\d{2}:\d{2}$/.test(t.dueTime) ? t.dueTime : '',
+    endTime: event && /^\d{2}:\d{2}$/.test(t.endTime) ? t.endTime : '',
+    location: event ? String(t.location ?? '').trim().slice(0, 200) : '',
+    amount: money ? Math.min(Math.max(Math.round(Number(t.amount) || 0), 0), 1e13) : 0,
+    // เลขที่รายการจากสลิป (ใช้เตือนเมื่ออ่านสลิปเดิมซ้ำ)
+    ref: money ? String(t.ref ?? '').replace(/[^\w-]/g, '').slice(0, 64) : '',
     priority: PRIORITIES[t.priority] ? t.priority : 'medium',
     tags: Array.isArray(t.tags)
       ? [...new Set(t.tags.map((x) => String(x).trim().replace(/^#/, '')).filter(Boolean))].slice(0, 20)
       : [],
     done,
     completedAt: done ? Number(t.completedAt) || now : null,
-    createdAt: Number(t.createdAt) || now,
+    createdAt,
     updatedAt: Number(t.updatedAt) || now,
   };
 }
 
 export const isEvent = (t) => t.type === 'event';
-export const isPlan = (t) => PLAN_TYPES.includes(t.type);
+export const isMoney = (t) => MONEY_TYPES.includes(t.type);
 
-// รายการในตารางที่ต้องทำในวันนั้น
-export const onDay = (t, iso) => !t.days.length || t.days.includes(parseISODate(iso).getDay());
-export const isDoneOn = (t, iso) => t.doneDates.includes(iso);
-export const isMissedOn = (t, iso) => t.missedDates.includes(iso);
-
-export function daysLabel(days) {
-  const key = days.join();
-  if (!days.length || days.length === 7) return t('everyDay');
-  if (key === '1,2,3,4,5') return t('weekdays');
-  if (key === '0,6') return t('weekend');
-  return days.map(weekdayShort).join(' ');
+// "125.50" / "1,200" → สตางค์ · ค่าที่ไม่ถูกต้องหรือ ≤ 0 → 0
+export function toSatang(s) {
+  const n = Number(String(s ?? '').replace(/[,\s฿]/g, ''));
+  return Number.isFinite(n) && n > 0 ? Math.min(Math.round(n * 100), 1e13) : 0;
 }
 
-// เรียงตามมื้อ → เวลา → สร้างก่อน
-export function comparePlan(a, b) {
-  return (
-    (a.type === 'meal' && b.type === 'meal' ? MEALS[a.category].rank - MEALS[b.category].rank : 0) ||
-    ((a.dueTime ? 0 : 1) - (b.dueTime ? 0 : 1)) ||
-    a.dueTime.localeCompare(b.dueTime) ||
-    (a.createdAt - b.createdAt)
-  );
+// สตางค์ → "฿1,250" หรือ "฿125.50" (แสดงทศนิยมเมื่อมีเศษสตางค์)
+const moneyFormatters = new Map();
+export function formatMoney(satang) {
+  const frac = satang % 100 ? 2 : 0;
+  const key = `${locale()}|${frac}`;
+  if (!moneyFormatters.has(key)) {
+    moneyFormatters.set(key, new Intl.NumberFormat(locale(), {
+      style: 'currency', currency: 'THB', currencyDisplay: 'narrowSymbol',
+      minimumFractionDigits: frac, maximumFractionDigits: frac,
+    }));
+  }
+  return moneyFormatters.get(key).format(satang / 100);
 }
 
 // กิจกรรมที่ผ่านไปแล้ว (ดูจากเวลาสิ้นสุด ถ้าไม่มีใช้เวลาเริ่ม ถ้าไม่มีเวลาเลยถือว่าทั้งวัน)

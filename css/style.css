@@ -23,6 +23,16 @@
   --cat-personal: #db2777;
   --cat-travel: #15803d;
   --cat-other: #6b7a90;
+  --income: #16a34a;
+  --m-food: #e38a14;
+  --m-transport: #0e8fa8;
+  --m-shopping: #db2777;
+  --m-bills: #7c3aed;
+  --m-health: #e5484d;
+  --m-fun: #2563eb;
+  --m-salary: #16a34a;
+  --m-bonus: #ca8a04;
+  --m-sales: #0d9488;
   --shadow: 0 1px 2px rgb(16 24 40 / 0.05), 0 1px 3px rgb(16 24 40 / 0.06);
   --shadow-lg: 0 12px 32px rgb(16 24 40 / 0.16);
   --radius: 14px;
@@ -57,6 +67,16 @@
     --cat-personal: #f472b6;
     --cat-travel: #4ade80;
     --cat-other: #8d9ab0;
+    --income: #4ade80;
+    --m-food: #f5a524;
+    --m-transport: #38bdd8;
+    --m-shopping: #f472b6;
+    --m-bills: #a78bfa;
+    --m-health: #f87171;
+    --m-fun: #60a5fa;
+    --m-salary: #4ade80;
+    --m-bonus: #facc15;
+    --m-sales: #2dd4bf;
     --shadow: 0 1px 2px rgb(0 0 0 / 0.3);
     --shadow-lg: 0 16px 40px rgb(0 0 0 / 0.5);
     color-scheme: dark;
@@ -86,6 +106,16 @@
   --cat-personal: #f472b6;
   --cat-travel: #4ade80;
   --cat-other: #8d9ab0;
+  --income: #4ade80;
+  --m-food: #f5a524;
+  --m-transport: #38bdd8;
+  --m-shopping: #f472b6;
+  --m-bills: #a78bfa;
+  --m-health: #f87171;
+  --m-fun: #60a5fa;
+  --m-salary: #4ade80;
+  --m-bonus: #facc15;
+  --m-sales: #2dd4bf;
   --shadow: 0 1px 2px rgb(0 0 0 / 0.3);
   --shadow-lg: 0 16px 40px rgb(0 0 0 / 0.5);
   color-scheme: dark;
@@ -1250,95 +1280,150 @@ textarea:focus {
   border-color: var(--accent);
 }
 
-/* ---------- ออกกำลังกาย ---------- */
-.day-strip {
-  display: grid;
-  grid-template-columns: repeat(7, minmax(0, 1fr));
-  gap: 6px;
-  margin-bottom: 16px;
+/* ---------- รายรับรายจ่าย ---------- */
+/* หมวดเงิน: เปลี่ยนสี --event ของรายการนั้น (ใช้ร่วมกับ .event-mark .kind-badge .cat-row) */
+.mcat-food { --event: var(--m-food); }
+.mcat-transport { --event: var(--m-transport); }
+.mcat-shopping { --event: var(--m-shopping); }
+.mcat-bills { --event: var(--m-bills); }
+.mcat-health { --event: var(--m-health); }
+.mcat-fun { --event: var(--m-fun); }
+.mcat-other,
+.mcat-otherIncome { --event: var(--cat-other); }
+.mcat-salary { --event: var(--m-salary); }
+.mcat-bonus { --event: var(--m-bonus); }
+.mcat-sales { --event: var(--m-sales); }
+
+.money-quick .segmented {
+  flex: none;
 }
-.day-pill {
-  display: grid;
-  justify-items: center;
-  padding: 8px 0 6px;
-  border: 1px solid var(--border);
-  border-radius: var(--radius-sm);
-  background: var(--surface);
-  color: var(--text);
-  box-shadow: var(--shadow);
+.money-type .is-expense,
+.money-type > label > .is-expense {
+  --type: var(--danger);
 }
-.day-pill:hover {
-  border-color: var(--accent);
+.money-type .is-income,
+.money-type > label > .is-income {
+  --type: var(--income);
 }
-.day-pill.is-today .wn {
-  color: var(--accent);
-}
-.day-pill .wc {
-  margin: 0;
-  min-height: 18px;
-}
-.day-pill .wc.is-complete {
-  color: var(--success);
-  font-weight: 700;
-}
-.day-pill[aria-pressed='true'] {
-  background: var(--accent);
-  border-color: var(--accent);
-}
-.day-pill[aria-pressed='true'] > span,
-.day-pill.is-today[aria-pressed='true'] .wn {
+.money-type > button[aria-pressed='true'],
+.money-type > label > input:checked + span {
+  background: var(--type);
   color: var(--on-accent);
 }
-.task.plan-workout {
-  --prio: var(--accent);
+.stat-income .stat-value {
+  color: var(--income);
 }
-.task.plan-meal {
-  --prio: var(--success);
-  --event: var(--success);
+.money-grid {
+  display: grid;
+  grid-template-columns: minmax(280px, 1fr) minmax(0, 1.6fr);
+  gap: 16px;
+  align-items: start;
 }
-.plan-marks {
+.money-side {
+  display: grid;
+  gap: 16px;
+  min-width: 0;
+}
+.money-rows .cat-row {
+  grid-template-columns: 84px minmax(0, 1fr) auto;
+}
+.money-rows .cat-count {
+  min-width: 64px;
+}
+.cat-row[aria-pressed='true'] {
+  background: color-mix(in srgb, var(--event) 12%, transparent);
+}
+.money-day + .money-day {
+  margin-top: 8px;
+}
+.money-day .group-title {
   display: flex;
-  flex: none;
-  gap: 6px;
-  margin-top: 6px;
+  justify-content: space-between;
+  gap: 8px;
+  padding: 6px 4px 2px;
+  border-bottom: 1px solid var(--border);
 }
-.plan-mark {
-  --mark: var(--prio);
-  padding: 4px 10px;
-  border: 1.5px solid color-mix(in srgb, var(--mark) 45%, var(--border));
-  border-radius: 99px;
-  background: transparent;
+.money-net {
+  font-variant-numeric: tabular-nums;
+  color: var(--income);
+}
+.money-net.is-neg {
   color: var(--text-2);
-  font-size: 13px;
+}
+.money-amount {
+  flex: none;
+  align-self: center;
+  padding: 0 4px;
   font-weight: 600;
+  font-variant-numeric: tabular-nums;
   white-space: nowrap;
-  transition: background 0.15s, color 0.15s, transform 0.1s;
 }
-.plan-mark.mark-missed {
-  --mark: var(--danger);
+.money-item.is-income .money-amount {
+  color: var(--income);
 }
-.plan-mark:hover {
-  color: var(--mark);
-  background: color-mix(in srgb, var(--mark) 10%, transparent);
+.amount-input {
+  font-size: 22px;
+  font-weight: 600;
+  font-variant-numeric: tabular-nums;
 }
-.plan-mark:active {
-  transform: scale(0.94);
+.slip-btn svg {
+  width: 18px;
+  height: 18px;
 }
-.plan-mark[aria-pressed='true'] {
-  border-color: var(--mark);
-  background: var(--mark);
-  color: var(--surface);
+.slip-box {
+  display: flex;
+  gap: 12px;
+  padding: 10px;
+  border: 1px solid var(--border);
+  border-radius: var(--radius-sm);
+  background: var(--surface-2);
 }
-.task.is-missed .task-title {
+.slip-box[hidden] {
+  display: none;
+}
+.slip-img {
+  flex: none;
+  width: 72px;
+  max-height: 120px;
+  object-fit: cover;
+  object-position: top;
+  border-radius: 8px;
+  background: var(--surface);
+}
+.slip-info {
+  display: grid;
+  align-content: center;
+  gap: 4px;
+  min-width: 0;
+  font-size: 13px;
+}
+.slip-info p {
+  margin: 0;
+}
+.slip-status {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  font-weight: 600;
+}
+.slip-status .spinner {
+  display: none;
+  width: 14px;
+  height: 14px;
+  border-width: 2px;
+}
+.slip-status.is-busy .spinner {
+  display: inline-block;
+}
+.slip-status.is-ok {
+  color: var(--success);
+}
+.slip-status.is-warn,
+.slip-dup {
   color: var(--danger);
 }
-.plan-detail {
-  white-space: pre-line;
-  overflow-wrap: anywhere;
-}
-.field-hint {
+.slip-note {
   color: var(--text-3);
-  font-size: 12px;
 }
 
 /* ---------- Dialog ---------- */
@@ -1365,7 +1450,7 @@ dialog[open] {
   }
 }
 #task-form,
-#plan-form {
+#money-form {
   display: grid;
   gap: 14px;
   padding: 18px 20px 20px;
@@ -1462,8 +1547,7 @@ dialog[open] {
 #task-form:not(.is-edit) .edit-only,
 #task-form[data-type='event'] .task-only,
 #task-form:not([data-type='event']) .event-only,
-#plan-form:not(.is-edit) .edit-only,
-#plan-form:not([data-type='meal']) .meal-only {
+#money-form:not(.is-edit) .edit-only {
   display: none;
 }
 .type-picker {
@@ -1607,8 +1691,23 @@ dialog[open] {
   .stat-value {
     font-size: 24px;
   }
-  .dash-grid {
+  .dash-grid,
+  .money-grid {
     grid-template-columns: minmax(0, 1fr);
+  }
+  .money-quick .segmented {
+    width: 100%;
+  }
+  .money-quick .segmented > button {
+    flex: 1;
+    justify-content: center;
+  }
+  .quick-add.money-quick input {
+    flex: 1 1 100%;
+  }
+  .money-quick .slip-btn,
+  .money-quick .btn-primary {
+    flex: 1;
   }
   .quick-add {
     flex-wrap: wrap;
@@ -1685,7 +1784,7 @@ dialog[open] {
     animation: sheet-up 0.22s ease-out;
   }
   #task-form,
-  #plan-form {
+  #money-form {
     padding: 16px 16px calc(16px + env(safe-area-inset-bottom));
   }
   .dialog-foot .btn {

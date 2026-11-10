@@ -4,13 +4,13 @@
   <meta charset="utf-8" />
   <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover" />
   <title>MildTask</title>
-  <meta name="description" content="จัดการงาน ตารางงาน และ To-do list ส่วนตัว" data-i18n-attr="content:meta.description" />
+  <meta name="description" content="จัดการงาน ตารางงาน To-do list และรายรับรายจ่ายส่วนตัว" data-i18n-attr="content:meta.description" />
   <meta name="theme-color" content="#4f46e5" />
   <link rel="icon" href="data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 32 32'%3E%3Crect width='32' height='32' rx='8' fill='%234f46e5'/%3E%3Cpath d='M9 16.5l4.5 4.5L23 11.5' fill='none' stroke='white' stroke-width='3' stroke-linecap='round' stroke-linejoin='round'/%3E%3C/svg%3E" />
   <link rel="preconnect" href="https://fonts.googleapis.com" />
   <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
   <link href="https://fonts.googleapis.com/css2?family=Noto+Sans+Thai:wght@400;500;600;700&display=swap" rel="stylesheet" />
-  <link rel="stylesheet" href="css/style.css?v=5" />
+  <link rel="stylesheet" href="css/style.css?v=6" />
   <script>
     // ตั้งธีมก่อนหน้าเว็บแสดง เพื่อไม่ให้กระพริบ
     try {
@@ -46,9 +46,9 @@
         <svg viewBox="0 0 24 24" aria-hidden="true"><path d="M4 7a2 2 0 0 1 2-2h12a2 2 0 0 1 2 2v12a2 2 0 0 1-2 2H6a2 2 0 0 1-2-2zM4 10h16M8 3v4M16 3v4" /></svg>
         <span data-i18n="view.calendar">ตารางงาน</span>
       </button>
-      <button class="tab" data-view="fitness" type="button">
-        <svg viewBox="0 0 24 24" aria-hidden="true"><path d="M6 7v10M18 7v10M3 10v4M21 10v4M6 12h12" /></svg>
-        <span data-i18n="view.fitness">ออกกำลังกาย</span>
+      <button class="tab" data-view="money" type="button">
+        <svg viewBox="0 0 24 24" aria-hidden="true"><path d="M4 7a2 2 0 0 1 2-2h12a2 2 0 0 1 2 2v10a2 2 0 0 1-2 2H6a2 2 0 0 1-2-2zM4 9h16M16 14h1" /></svg>
+        <span data-i18n="view.money">การเงิน</span>
       </button>
     </nav>
 
@@ -182,72 +182,76 @@
     </form>
   </dialog>
 
-  <dialog id="plan-dialog" aria-labelledby="plan-dialog-title">
-    <form id="plan-form" novalidate>
+  <dialog id="money-dialog" aria-labelledby="money-dialog-title">
+    <form id="money-form" novalidate>
       <header class="dialog-head">
-        <h2 id="plan-dialog-title"></h2>
-        <button class="icon-btn" type="button" data-action="close-plan" aria-label="ปิด" data-i18n-attr="aria-label:close">
+        <h2 id="money-dialog-title"></h2>
+        <button class="icon-btn" type="button" data-action="close-money" aria-label="ปิด" data-i18n-attr="aria-label:close">
           <svg viewBox="0 0 24 24" aria-hidden="true"><path d="M6 6l12 12M18 6L6 18" /></svg>
         </button>
       </header>
 
-      <div class="segmented type-picker" role="radiogroup" aria-label="ประเภท" data-i18n-attr="aria-label:type">
-        <label><input type="radio" name="type" value="workout" /><span data-i18n="type.workout">สิ่งที่ต้องทำ</span></label>
-        <label><input type="radio" name="type" value="meal" /><span data-i18n="type.meal">สิ่งที่ต้องกิน</span></label>
+      <div class="slip-box" hidden>
+        <img class="slip-img" alt="" />
+        <div class="slip-info">
+          <p class="slip-status"><span class="spinner"></span><span class="slip-msg"></span></p>
+          <p class="slip-dup" hidden></p>
+          <p class="slip-note" data-i18n="slip.private">รูปสลิปใช้อ่านในเครื่องนี้เท่านั้น ไม่ถูกอัปโหลดหรือบันทึก</p>
+        </div>
+      </div>
+      <input type="hidden" name="ref" />
+
+      <div class="segmented type-picker money-type" role="radiogroup" aria-label="ประเภท" data-i18n-attr="aria-label:type">
+        <label><input type="radio" name="type" value="expense" /><span class="is-expense" data-i18n="type.expense">รายจ่าย</span></label>
+        <label><input type="radio" name="type" value="income" /><span class="is-income" data-i18n="type.income">รายรับ</span></label>
       </div>
 
       <label class="field">
-        <span data-i18n="f.name">ชื่อ</span>
-        <input name="title" type="text" maxlength="200" required autocomplete="off" />
-        <small class="field-error" hidden data-i18n="f.titleRequired">กรุณาใส่ชื่อ</small>
+        <span data-i18n="f.amount">จำนวนเงิน (บาท)</span>
+        <input name="amount" class="amount-input" type="text" inputmode="decimal" autocomplete="off" placeholder="0.00" />
+        <small class="field-error amount-error" hidden data-i18n="f.amountRequired">กรุณาใส่จำนวนเงินมากกว่า 0</small>
       </label>
+
+      <label class="field">
+        <span data-i18n="f.item">รายการ</span>
+        <input name="title" type="text" maxlength="200" autocomplete="off" />
+      </label>
+
+      <fieldset class="field">
+        <legend data-i18n="f.moneyCategory">หมวด</legend>
+        <div class="segmented cat-picker" id="money-cats"></div>
+      </fieldset>
+
+      <div class="field-row">
+        <label class="field">
+          <span data-i18n="f.date">วันที่</span>
+          <input name="dueDate" type="date" />
+        </label>
+        <label class="field">
+          <span data-i18n="f.tags">แท็ก</span>
+          <input name="tags" type="text" list="money-tag-options" autocomplete="off" placeholder="ไม่ใส่ก็ได้" data-i18n-attr="placeholder:f.optional" />
+          <datalist id="money-tag-options"></datalist>
+        </label>
+      </div>
 
       <label class="field">
         <span data-i18n="f.description">รายละเอียด</span>
-        <textarea name="description" rows="2" maxlength="5000"></textarea>
-      </label>
-
-      <fieldset class="field meal-only">
-        <legend data-i18n="f.meal">มื้อ</legend>
-        <div class="segmented cat-picker">
-          <label><input type="radio" name="meal" value="breakfast" /><span data-i18n="meal.breakfast">มื้อเช้า</span></label>
-          <label><input type="radio" name="meal" value="lunch" /><span data-i18n="meal.lunch">มื้อกลางวัน</span></label>
-          <label><input type="radio" name="meal" value="snack" /><span data-i18n="meal.snack">มื้อว่าง</span></label>
-          <label><input type="radio" name="meal" value="dinner" /><span data-i18n="meal.dinner">มื้อเย็น</span></label>
-        </div>
-      </fieldset>
-
-      <fieldset class="field">
-        <legend data-i18n="f.repeat">ทำซ้ำทุกสัปดาห์ในวัน</legend>
-        <div class="segmented cat-picker">
-          <label><input type="checkbox" name="days" value="1" /><span data-wd="1">จ.</span></label>
-          <label><input type="checkbox" name="days" value="2" /><span data-wd="2">อ.</span></label>
-          <label><input type="checkbox" name="days" value="3" /><span data-wd="3">พ.</span></label>
-          <label><input type="checkbox" name="days" value="4" /><span data-wd="4">พฤ.</span></label>
-          <label><input type="checkbox" name="days" value="5" /><span data-wd="5">ศ.</span></label>
-          <label><input type="checkbox" name="days" value="6" /><span data-wd="6">ส.</span></label>
-          <label><input type="checkbox" name="days" value="0" /><span data-wd="0">อา.</span></label>
-        </div>
-        <small class="field-hint" data-i18n="f.repeatHint">ไม่เลือกเลย = ทุกวัน</small>
-      </fieldset>
-
-      <label class="field">
-        <span data-i18n="f.time">เวลา</span>
-        <input name="dueTime" type="time" />
+        <textarea name="description" rows="2" maxlength="5000" placeholder="โน้ตเพิ่มเติม (ไม่ใส่ก็ได้)" data-i18n-attr="placeholder:f.descPh"></textarea>
       </label>
 
       <footer class="dialog-foot">
-        <button class="btn btn-danger-ghost edit-only" type="button" data-action="delete-plan" data-i18n="delete">ลบ</button>
+        <button class="btn btn-danger-ghost edit-only" type="button" data-action="delete-money" data-i18n="delete">ลบ</button>
         <span class="spacer"></span>
-        <button class="btn" type="button" data-action="close-plan" data-i18n="cancel">ยกเลิก</button>
+        <button class="btn" type="button" data-action="close-money" data-i18n="cancel">ยกเลิก</button>
         <button class="btn btn-primary" type="submit" data-i18n="save">บันทึก</button>
       </footer>
     </form>
   </dialog>
 
   <input type="file" id="import-file" accept="application/json,.json" hidden />
+  <input type="file" id="slip-file" accept="image/*" hidden />
   <div id="toast" class="toast" role="status" aria-live="polite" hidden></div>
 
-  <script type="module" src="js/app.js?v=5"></script>
+  <script type="module" src="js/app.js?v=6"></script>
 </body>
 </html>
